@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { pathToFileURL } from "node:url";
-import { runList, runShow, runValidate, type CommandContext } from "./commands.js";
+import { runExport, runList, runShow, runValidate, type CommandContext } from "./commands.js";
 
 const defaultContext: CommandContext = {
   cwd: process.cwd(),
@@ -41,6 +41,16 @@ export function createProgram(context: CommandContext = defaultContext): Command
     .option("--root <path>", "Source library root.")
     .option("--format <format>", "Output format: text or json.")
     .action((options) => runValidate(options, context));
+
+  program
+    .command("export")
+    .description("Export a threadkit profile for a target.")
+    .argument("<target>", "Export target.")
+    .option("--profile <name>", "Profile name.")
+    .option("--root <path>", "Source library root.")
+    .option("--out <path>", "Output root.")
+    .option("--format <format>", "Output format: text or json.")
+    .action((target, options) => runExport(target, options, context));
 
   return program;
 }

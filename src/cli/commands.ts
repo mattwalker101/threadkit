@@ -1,6 +1,13 @@
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { loadLibrary, type LoadedSkill } from "../core/index.js";
+import { join, resolve } from "node:path";
+import {
+  getExportTarget,
+  loadLibrary,
+  markdownRenderer,
+  resolveProfile,
+  writeExportFiles,
+  type LoadedSkill
+} from "../core/index.js";
 
 export type OutputFormat = "text" | "json";
 
@@ -14,6 +21,11 @@ export interface CommandContext {
 export interface RootOptions {
   root?: string;
   format?: string;
+}
+
+export interface ExportOptions extends RootOptions {
+  profile?: string;
+  out?: string;
 }
 
 interface CliError {
@@ -183,5 +195,80 @@ export async function runShow(
     }
 
     context.writeError(`Show failed: ${normalized.message}\n`);
+  }
+}
+
+export async function runExport(
+  targetName: string,
+  options: ExportOptions,
+  context: CommandContext
+): Promise<void> {
+  const root = getRoot(options, context);
+  const outDir = resolve(context.cwd, options.out ?? join(root, "dist"));
+  const format = getFormat(options.format);
+  const profileName = options.profile;
+
+  try {
+    if (!profileName) {
+      throw new CliUsageError("missing-profile", "Export requires --profile <name>.");
+    }
+
+    const target = getExportTarget(targetName);
+
+    if (!target) {
+      throw new CliUsageError("unsupported-target", `Export target '${targetName}' is not supported.`);
+    }
+
+    const library = await loadLibrary(root);
+    const profile = library.profiles.find((candidate) => candidate.name === profileName);
+
+    if (!profile) {
+      throw new CliUsageError("unknown-profile", `Profile '${profileName}' was not found.`);
+    }
+
+    const resolved = resolveProfile({ profile, skills: library.skills });
+    const result = markdownRenderer.render({
+      profile: profileName,
+      target: target.name,
+      scope: "user",
+      skills: resolved.skills
+    });
+    const files = await writeExportFiles({ outDir, files: result.files });
+
+    context.setExitCode(0);
+
+    if (format === "json") {
+      writeJson(context, {
+        ok: true,
+        root,
+        target: target.name,
+        profile: profileName,
+        outDir,
+        files,
+        warnings: result.warnings
+      });
+      return;
+    }
+
+    for (const file of files) {
+      context.write(`Exported ${file.relPath} to ${outDir}\n`);
+    }
+  } catch (error) {
+    const normalized = normalizeError(error);
+    context.setExitCode(error instanceof CliUsageError ? 2 : 1);
+
+    if (format === "json") {
+      writeJson(context, {
+        ok: false,
+        root,
+        target: targetName,
+        profile: profileName,
+        errors: [normalized],
+        warnings: []
+      });
+      return;
+    }
+
+    context.writeError(`Export failed: ${normalized.message}\n`);
   }
 }

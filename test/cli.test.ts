@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -264,5 +264,154 @@ describe("threadkit CLI", () => {
     expect(harness.stderr).toBe("");
     expect(harness.exitCode).toBe(0);
     expect(harness.stdout).toBe("Handoff (handoff)\n\n# Handoff\n");
+  });
+
+  it("exports markdown to the default dist directory", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync(["node", "threadkit", "export", "markdown", "--profile", "minimal", "--root", root]);
+
+    const output = await readFile(join(root, "dist", "markdown", "minimal.md"), "utf8");
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(output).toContain("# minimal\n\n<!-- threadkit:generated target=markdown profile=minimal -->");
+    expect(output).toContain("## Handoff");
+  });
+
+  it("exports markdown to a custom output directory", async () => {
+    const root = await makeTempRoot();
+    const out = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "export",
+      "markdown",
+      "--profile",
+      "minimal",
+      "--root",
+      root,
+      "--out",
+      out
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(join(out, "markdown", "minimal.md"), "utf8")).toContain("## Handoff");
+  });
+
+  it("reports successful markdown export as JSON", async () => {
+    const root = await makeTempRoot();
+    const out = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "export",
+      "markdown",
+      "--profile",
+      "minimal",
+      "--root",
+      root,
+      "--out",
+      out,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(JSON.parse(harness.stdout)).toEqual({
+      ok: true,
+      root,
+      target: "markdown",
+      profile: "minimal",
+      outDir: out,
+      files: [
+        {
+          path: join(out, "markdown", "minimal.md"),
+          relPath: "markdown/minimal.md",
+          marker: true,
+          bytes: expect.any(Number)
+        }
+      ],
+      warnings: []
+    });
+  });
+
+  it("reports unknown profiles as JSON usage faults", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "export",
+      "markdown",
+      "--profile",
+      "missing",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(2);
+    expect(JSON.parse(harness.stdout)).toEqual({
+      ok: false,
+      root,
+      target: "markdown",
+      profile: "missing",
+      errors: [
+        {
+          code: "unknown-profile",
+          message: "Profile 'missing' was not found."
+        }
+      ],
+      warnings: []
+    });
+  });
+
+  it("reports unsupported export targets as usage faults", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "export",
+      "codex",
+      "--profile",
+      "minimal",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(2);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: false,
+      root,
+      target: "codex",
+      profile: "minimal",
+      errors: [
+        {
+          code: "unsupported-target",
+          message: "Export target 'codex' is not supported."
+        }
+      ],
+      warnings: []
+    });
   });
 });

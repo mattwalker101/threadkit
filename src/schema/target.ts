@@ -24,9 +24,18 @@ export const targetSchema = z
     name: skillIdSchema,
     format: rendererFormatSchema,
     distSubdir: z.string().min(1),
-    paths: targetPathsSchema
+    paths: targetPathsSchema.optional()
   })
-  .strict();
+  .strict()
+  .superRefine((target, context) => {
+    if (target.format !== "markdown" && target.paths === undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "Install targets must define at least one path.",
+        path: ["paths"]
+      });
+    }
+  });
 
 export const targetMapSchema = z.record(skillIdSchema, targetSchema).superRefine((targetMap, context) => {
   for (const [key, target] of Object.entries(targetMap)) {

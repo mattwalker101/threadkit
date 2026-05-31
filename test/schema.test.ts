@@ -108,13 +108,18 @@ describe("target map schema", () => {
         paths: {
           project: "./AGENTS.md"
         }
+      },
+      markdown: {
+        name: "markdown",
+        format: "markdown",
+        distSubdir: "markdown"
       }
     };
 
     expect(targetMapSchema.parse(targetMap)).toEqual(targetMap);
   });
 
-  it("rejects unknown renderer formats and targets without install paths", () => {
+  it("rejects unknown renderer formats and install targets without install paths", () => {
     expect(
       targetMapSchema.safeParse({
         claude: {

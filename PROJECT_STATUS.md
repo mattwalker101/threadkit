@@ -2,19 +2,21 @@
 
 ## Current Slice
 
-Slice 5 complete: Inspection CLI.
+Slice 6 complete: Markdown Export Boundary.
 
-Next slice: Slice 6, Export Pipeline.
+Next slice: expand renderer and target coverage beyond the initial markdown
+export tracer bullet.
 
 ## Current Goal
 
-Build the export pipeline for the first target formats on top of the loaded and
-validated library model.
+Build broader renderer and target coverage on top of the Slice 6 export
+boundary.
 
-Slice 5 added `threadkit list`, `threadkit show <skill-id>`, and
-`threadkit validate` with human-readable output and `--format json` envelopes.
-The validate command uses the Slice 4.5 `loadLibrary` validation behavior and
-runs canonical validation only for the default repository root.
+Slice 6 added `threadkit export markdown --profile <name>` with optional
+`--root`, `--out`, and `--format json` flags. The markdown renderer is pure and
+returns file specs, while filesystem writes happen in the shared export writer.
+The default output root is `dist/`, producing
+`dist/markdown/<profile>.md`.
 
 ## Local Environment
 
