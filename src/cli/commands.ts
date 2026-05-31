@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   getExportTarget,
+  getRenderer,
   loadLibrary,
-  markdownRenderer,
   resolveProfile,
   writeExportFiles,
   type LoadedSkill
@@ -227,7 +227,13 @@ export async function runExport(
     }
 
     const resolved = resolveProfile({ profile, skills: library.skills });
-    const result = markdownRenderer.render({
+    const renderer = getRenderer(target.format);
+
+    if (!renderer) {
+      throw new CliUsageError("unsupported-format", `Export format '${target.format}' is not supported.`);
+    }
+
+    const result = renderer.render({
       profile: profileName,
       target: target.name,
       scope: "user",

@@ -2,6 +2,10 @@ export interface ExportTarget {
   name: string;
   format: string;
   distSubdir: string;
+  paths?: {
+    user?: string;
+    project?: string;
+  };
 }
 
 export const exportTargets = {
@@ -9,6 +13,24 @@ export const exportTargets = {
     name: "markdown",
     format: "markdown",
     distSubdir: "markdown"
+  },
+  claude: {
+    name: "claude",
+    format: "skill",
+    distSubdir: "claude",
+    paths: {
+      user: "~/.claude/skills",
+      project: "./.claude/skills"
+    }
+  },
+  antigravity: {
+    name: "antigravity",
+    format: "skill",
+    distSubdir: "antigravity",
+    paths: {
+      user: "~/.gemini/skills",
+      project: "./.agents/skills"
+    }
   }
 } as const satisfies Record<string, ExportTarget>;
 
