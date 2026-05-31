@@ -229,4 +229,40 @@ describe("threadkit CLI", () => {
       warnings: []
     });
   });
+
+  it("validates with human-readable output", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync(["node", "threadkit", "validate", "--root", root]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(harness.stdout).toBe(`Library is valid: ${root}\n`);
+  });
+
+  it("lists skills with human-readable output", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync(["node", "threadkit", "list", "--root", root]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(harness.stdout).toBe("handoff\tHandoff\tCreates a handoff document.\n");
+  });
+
+  it("shows a skill with human-readable output", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync(["node", "threadkit", "show", "handoff", "--root", root]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(harness.stdout).toBe("Handoff (handoff)\n\n# Handoff\n");
+  });
 });
