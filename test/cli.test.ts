@@ -20,6 +20,10 @@ triggers:
 profiles:
   - minimal
 targets:
+  claude:
+    enabled: true
+  antigravity:
+    enabled: true
   markdown:
     enabled: true
 safety:
@@ -194,6 +198,8 @@ describe("threadkit CLI", () => {
         triggers: ["create a handoff", "write a handoff document"],
         profiles: ["minimal"],
         targets: {
+          claude: { enabled: true },
+          antigravity: { enabled: true },
           markdown: { enabled: true }
         },
         safety: {
@@ -347,6 +353,66 @@ describe("threadkit CLI", () => {
     });
   });
 
+  it("exports claude skills to the default dist directory", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync(["node", "threadkit", "export", "claude", "--profile", "minimal", "--root", root]);
+
+    const output = await readFile(join(root, "dist", "claude", "skills", "handoff", "SKILL.md"), "utf8");
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(output).toContain("name: handoff");
+    expect(output).toContain("description: Creates a handoff document.");
+    expect(output).toContain("<!-- threadkit:generated target=claude profile=minimal skill=handoff -->");
+    expect(output).toContain("# Handoff");
+  });
+
+  it("exports antigravity skills to a custom output directory as JSON", async () => {
+    const root = await makeTempRoot();
+    const out = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "export",
+      "antigravity",
+      "--profile",
+      "minimal",
+      "--root",
+      root,
+      "--out",
+      out,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(join(out, "antigravity", "skills", "handoff", "SKILL.md"), "utf8")).toContain(
+      "<!-- threadkit:generated target=antigravity profile=minimal skill=handoff -->"
+    );
+    expect(JSON.parse(harness.stdout)).toEqual({
+      ok: true,
+      root,
+      target: "antigravity",
+      profile: "minimal",
+      outDir: out,
+      files: [
+        {
+          path: join(out, "antigravity", "skills", "handoff", "SKILL.md"),
+          relPath: "antigravity/skills/handoff/SKILL.md",
+          marker: true,
+          bytes: expect.any(Number)
+        }
+      ],
+      warnings: []
+    });
+  });
+
   it("reports unknown profiles as JSON usage faults", async () => {
     const root = await makeTempRoot();
     await writeValidCustomLibrary(root);
@@ -391,7 +457,7 @@ describe("threadkit CLI", () => {
       "node",
       "threadkit",
       "export",
-      "codex",
+      "unknown-target",
       "--profile",
       "minimal",
       "--root",
@@ -405,12 +471,12 @@ describe("threadkit CLI", () => {
     expect(JSON.parse(harness.stdout)).toMatchObject({
       ok: false,
       root,
-      target: "codex",
+      target: "unknown-target",
       profile: "minimal",
       errors: [
         {
           code: "unsupported-target",
-          message: "Export target 'codex' is not supported."
+          message: "Export target 'unknown-target' is not supported."
         }
       ],
       warnings: []
