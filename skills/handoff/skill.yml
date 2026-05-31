@@ -1,0 +1,39 @@
+id: handoff
+name: Handoff
+version: 0.1.0
+status: draft
+summary: >
+  Compacts the current conversation into a handoff document that lets a fresh
+  agent continue the work with minimal duplicated context.
+category: coordination
+triggers:
+  - create a handoff
+  - write a handoff document
+  - prepare the next session
+profiles:
+  - minimal
+  - coding-heavy
+targets:
+  claude:
+    enabled: true
+  antigravity:
+    enabled: true
+  codex:
+    enabled: true
+  opencode:
+    enabled: true
+  gemini:
+    enabled: false
+  markdown:
+    enabled: true
+safety:
+  allow_shell_commands: false
+  allow_network: false
+  allow_file_writes: true
+  includes_scripts: false
+tags:
+  - continuity
+  - context
+  - session-transfer
+risk: low
+owner: matthew
