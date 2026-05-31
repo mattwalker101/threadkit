@@ -1,0 +1,4 @@
+name: minimal
+description: Smallest useful baseline for any local AI coding CLI environment.
+skills:
+  - handoff
