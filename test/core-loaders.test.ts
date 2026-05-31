@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadProfile, loadProfiles, loadSkill, loadSkills } from "../src/core/index.js";
+import { loadProfile, loadProfiles, loadSkill, loadSkills, resolveProfile } from "../src/core/index.js";
 
 async function makeTempRoot(): Promise<string> {
   return mkdtemp(join(tmpdir(), "threadkit-loaders-"));
@@ -121,5 +121,55 @@ describe("core profile loaders", () => {
       { name: "coding-heavy" },
       { name: "minimal" }
     ]);
+  });
+});
+
+describe("profile resolution", () => {
+  it("expands profile skill ids to loaded skills in profile order", async () => {
+    const root = await makeTempRoot();
+    await mkdir(join(root, "skills", "alpha-skill"), { recursive: true });
+    await mkdir(join(root, "skills", "zeta-skill"), { recursive: true });
+    await writeFile(
+      join(root, "skills", "alpha-skill", "skill.yml"),
+      validSkillYml.replaceAll("handoff", "alpha-skill")
+    );
+    await writeFile(join(root, "skills", "alpha-skill", "body.md"), "# Alpha\n");
+    await writeFile(
+      join(root, "skills", "zeta-skill", "skill.yml"),
+      validSkillYml.replaceAll("handoff", "zeta-skill")
+    );
+    await writeFile(join(root, "skills", "zeta-skill", "body.md"), "# Zeta\n");
+
+    const profile = {
+      name: "minimal",
+      file: join(root, "profiles", "minimal.yml"),
+      metadata: {
+        name: "minimal",
+        description: "Smallest useful baseline.",
+        skills: ["zeta-skill", "alpha-skill"]
+      }
+    };
+    const skills = await loadSkills(root);
+
+    expect(resolveProfile({ profile, skills }).skills.map((skill) => skill.id)).toEqual([
+      "zeta-skill",
+      "alpha-skill"
+    ]);
+  });
+
+  it("rejects profile references to missing skills", () => {
+    const profile = {
+      name: "minimal",
+      file: "/tmp/profiles/minimal.yml",
+      metadata: {
+        name: "minimal",
+        description: "Smallest useful baseline.",
+        skills: ["missing-skill"]
+      }
+    };
+
+    expect(() => resolveProfile({ profile, skills: [] })).toThrow(
+      "Profile 'minimal' references missing skill 'missing-skill'."
+    );
   });
 });
