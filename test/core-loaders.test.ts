@@ -1,0 +1,63 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { loadSkill } from "../src/core/index.js";
+
+async function makeTempRoot(): Promise<string> {
+  return mkdtemp(join(tmpdir(), "threadkit-loaders-"));
+}
+
+const validSkillYml = `id: handoff
+name: Handoff
+version: 0.1.0
+status: draft
+summary: Creates a handoff document.
+category: coordination
+triggers:
+  - create a handoff
+  - write a handoff document
+profiles:
+  - minimal
+targets:
+  markdown:
+    enabled: true
+safety:
+  allow_shell_commands: false
+  allow_network: false
+  allow_file_writes: true
+  includes_scripts: false
+tags: []
+`;
+
+describe("core skill loaders", () => {
+  it("loads skill metadata and body from skills/<id>", async () => {
+    const root = await makeTempRoot();
+    await mkdir(join(root, "skills", "handoff"), { recursive: true });
+    await writeFile(join(root, "skills", "handoff", "skill.yml"), validSkillYml);
+    await writeFile(
+      join(root, "skills", "handoff", "body.md"),
+      "# Handoff\n\nWrite a handoff document.\n"
+    );
+
+    const skill = await loadSkill({ root, id: "handoff" });
+
+    expect(skill).toMatchObject({
+      id: "handoff",
+      metadata: { id: "handoff", name: "Handoff" },
+      body: "# Handoff\n\nWrite a handoff document.\n"
+    });
+    expect(skill.dir).toBe(join(root, "skills", "handoff"));
+  });
+
+  it("rejects a skill when its folder id differs from metadata id", async () => {
+    const root = await makeTempRoot();
+    await mkdir(join(root, "skills", "handoff-copy"), { recursive: true });
+    await writeFile(join(root, "skills", "handoff-copy", "skill.yml"), validSkillYml);
+    await writeFile(join(root, "skills", "handoff-copy", "body.md"), "# Handoff\n");
+
+    await expect(loadSkill({ root, id: "handoff-copy" })).rejects.toThrow(
+      "Skill directory 'handoff-copy' does not match skill id 'handoff'."
+    );
+  });
+});
