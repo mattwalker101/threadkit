@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadSkill } from "../src/core/index.js";
+import { loadSkill, loadSkills } from "../src/core/index.js";
 
 async function makeTempRoot(): Promise<string> {
   return mkdtemp(join(tmpdir(), "threadkit-loaders-"));
@@ -59,5 +59,20 @@ describe("core skill loaders", () => {
     await expect(loadSkill({ root, id: "handoff-copy" })).rejects.toThrow(
       "Skill directory 'handoff-copy' does not match skill id 'handoff'."
     );
+  });
+
+  it("loads all skill directories in deterministic id order", async () => {
+    const root = await makeTempRoot();
+
+    for (const id of ["zeta-skill", "alpha-skill"]) {
+      await mkdir(join(root, "skills", id), { recursive: true });
+      await writeFile(join(root, "skills", id, "skill.yml"), validSkillYml.replaceAll("handoff", id));
+      await writeFile(join(root, "skills", id, "body.md"), `# ${id}\n`);
+    }
+
+    await expect(loadSkills(root)).resolves.toMatchObject([
+      { id: "alpha-skill" },
+      { id: "zeta-skill" }
+    ]);
   });
 });

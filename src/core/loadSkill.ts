@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { skillSchema, type Skill } from "../schema/index.js";
@@ -24,4 +24,14 @@ export async function loadSkill(args: { root: string; id: string }): Promise<Loa
     metadata,
     body: await readFile(join(dir, "body.md"), "utf8")
   };
+}
+
+export async function loadSkills(root: string): Promise<LoadedSkill[]> {
+  const entries = await readdir(join(root, "skills"), { withFileTypes: true });
+  const skillIds = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+
+  return Promise.all(skillIds.map((id) => loadSkill({ root, id })));
 }
