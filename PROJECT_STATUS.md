@@ -2,17 +2,19 @@
 
 ## Current Slice
 
-Slice 4.5 complete: Library Validation Hardening.
+Slice 5 complete: Inspection CLI.
 
-Next slice: Slice 5, Inspection CLI.
+Next slice: Slice 6, Export Pipeline.
 
 ## Current Goal
 
-Build the Inspection CLI on top of the hardened library validation contract.
+Build the export pipeline for the first target formats on top of the loaded and
+validated library model.
 
-Slice 5 should add list, show, and validate commands with human and
-machine-readable output. The validate command should use the Slice 4.5
-loadLibrary validation behavior rather than defining separate CLI-only rules.
+Slice 5 added `threadkit list`, `threadkit show <skill-id>`, and
+`threadkit validate` with human-readable output and `--format json` envelopes.
+The validate command uses the Slice 4.5 `loadLibrary` validation behavior and
+runs canonical validation only for the default repository root.
 
 ## Local Environment
 

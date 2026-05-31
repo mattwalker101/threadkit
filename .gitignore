@@ -4,3 +4,4 @@ dist/*
 .threadkit/
 .DS_Store
 coverage/
+.worktrees/
