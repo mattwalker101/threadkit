@@ -171,4 +171,40 @@ describe("threadkit CLI", () => {
       ]
     });
   });
+
+  it("shows a skill as JSON", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync(["node", "threadkit", "show", "handoff", "--root", root, "--format", "json"]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: true,
+      root,
+      skill: {
+        id: "handoff",
+        name: "Handoff",
+        version: "0.1.0",
+        status: "draft",
+        summary: "Creates a handoff document.",
+        category: "coordination",
+        triggers: ["create a handoff", "write a handoff document"],
+        profiles: ["minimal"],
+        targets: {
+          markdown: { enabled: true }
+        },
+        safety: {
+          allow_shell_commands: false,
+          allow_network: false,
+          allow_file_writes: true,
+          includes_scripts: false
+        },
+        tags: [],
+        body: "# Handoff\n"
+      }
+    });
+  });
 });

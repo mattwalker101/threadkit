@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { pathToFileURL } from "node:url";
-import { runList, runValidate, type CommandContext } from "./commands.js";
+import { runList, runShow, runValidate, type CommandContext } from "./commands.js";
 
 const defaultContext: CommandContext = {
   cwd: process.cwd(),
@@ -26,6 +26,14 @@ export function createProgram(context: CommandContext = defaultContext): Command
     .option("--root <path>", "Source library root.")
     .option("--format <format>", "Output format: text or json.")
     .action((options) => runList(options, context));
+
+  program
+    .command("show")
+    .description("Show a skill from a threadkit library.")
+    .argument("<skill-id>", "Skill id.")
+    .option("--root <path>", "Source library root.")
+    .option("--format <format>", "Output format: text or json.")
+    .action((skillId, options) => runShow(skillId, options, context));
 
   program
     .command("validate")

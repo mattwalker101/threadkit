@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { loadLibrary } from "../core/index.js";
+import { loadLibrary, type LoadedSkill } from "../core/index.js";
 
 export type OutputFormat = "text" | "json";
 
@@ -113,5 +113,59 @@ export async function runList(options: RootOptions, context: CommandContext): Pr
     }
 
     context.writeError(`List failed: ${normalized.message}\n`);
+  }
+}
+
+function toSkillJson(skill: LoadedSkill) {
+  return {
+    id: skill.id,
+    name: skill.metadata.name,
+    version: skill.metadata.version,
+    status: skill.metadata.status,
+    summary: skill.metadata.summary,
+    category: skill.metadata.category,
+    triggers: skill.metadata.triggers,
+    profiles: skill.metadata.profiles,
+    targets: skill.metadata.targets,
+    safety: skill.metadata.safety,
+    tags: skill.metadata.tags,
+    body: skill.body
+  };
+}
+
+export async function runShow(
+  skillId: string,
+  options: RootOptions,
+  context: CommandContext
+): Promise<void> {
+  const root = getRoot(options, context);
+  const format = getFormat(options.format);
+
+  try {
+    const library = await loadLibrary(root);
+    const skill = library.skills.find((candidate) => candidate.id === skillId);
+
+    if (!skill) {
+      throw new Error(`Skill '${skillId}' was not found.`);
+    }
+
+    context.setExitCode(0);
+
+    if (format === "json") {
+      writeJson(context, { ok: true, root, skill: toSkillJson(skill) });
+      return;
+    }
+
+    context.write(`${skill.metadata.name} (${skill.id})\n\n${skill.body}`);
+  } catch (error) {
+    const normalized = normalizeError(error);
+    context.setExitCode(1);
+
+    if (format === "json") {
+      writeJson(context, { ok: false, root, errors: [normalized], warnings: [] });
+      return;
+    }
+
+    context.writeError(`Show failed: ${normalized.message}\n`);
   }
 }
