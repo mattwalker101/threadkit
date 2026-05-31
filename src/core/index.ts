@@ -5,5 +5,6 @@ export * from "./resolveProfile.js";
 export * from "./renderTypes.js";
 export * from "./renderMarkdown.js";
 export * from "./renderSkill.js";
+export * from "./renderers.js";
 export * from "./writeExportFiles.js";
 export * from "./exportTargets.js";

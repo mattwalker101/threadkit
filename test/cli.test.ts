@@ -327,7 +327,9 @@ describe("threadkit CLI", () => {
 
     expect(harness.stderr).toBe("");
     expect(harness.exitCode).toBe(0);
-    expect(JSON.parse(harness.stdout)).toEqual({
+    const output = JSON.parse(harness.stdout);
+    expect(output.files[0].relPath).toBe("markdown/minimal.md");
+    expect(output).toEqual({
       ok: true,
       root,
       target: "markdown",
