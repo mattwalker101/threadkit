@@ -2,17 +2,17 @@
 
 ## Current Slice
 
-Slice 4 complete: Core Skill Seeding.
+Slice 4.5 complete: Library Validation Hardening.
 
-Next slice: Slice 4.5, Library Validation Hardening.
+Next slice: Slice 5, Inspection CLI.
 
 ## Current Goal
 
-Insert validation hardening before the Inspection CLI slice so malformed
-libraries fail consistently before list, show, and validate commands are built.
+Build the Inspection CLI on top of the hardened library validation contract.
 
-Slice 4.5 should cover empty skill bodies, profile reverse-index drift,
-canonical target flag completeness, and exact canonical skill directory checks.
+Slice 5 should add list, show, and validate commands with human and
+machine-readable output. The validate command should use the Slice 4.5
+loadLibrary validation behavior rather than defining separate CLI-only rules.
 
 ## Local Environment
 
