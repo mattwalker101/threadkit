@@ -2,7 +2,14 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadProfile, loadProfiles, loadSkill, loadSkills, resolveProfile } from "../src/core/index.js";
+import {
+  loadLibrary,
+  loadProfile,
+  loadProfiles,
+  loadSkill,
+  loadSkills,
+  resolveProfile
+} from "../src/core/index.js";
 
 async function makeTempRoot(): Promise<string> {
   return mkdtemp(join(tmpdir(), "threadkit-loaders-"));
@@ -171,5 +178,22 @@ describe("profile resolution", () => {
     expect(() => resolveProfile({ profile, skills: [] })).toThrow(
       "Profile 'minimal' references missing skill 'missing-skill'."
     );
+  });
+});
+
+describe("library loading", () => {
+  it("loads the complete canonical library from a root", async () => {
+    const root = await makeTempRoot();
+    await mkdir(join(root, "skills", "handoff"), { recursive: true });
+    await mkdir(join(root, "profiles"), { recursive: true });
+    await writeFile(join(root, "skills", "handoff", "skill.yml"), validSkillYml);
+    await writeFile(join(root, "skills", "handoff", "body.md"), "# Handoff\n");
+    await writeFile(join(root, "profiles", "minimal.yml"), validProfileYml);
+
+    await expect(loadLibrary(root)).resolves.toMatchObject({
+      root,
+      skills: [{ id: "handoff" }],
+      profiles: [{ name: "minimal" }]
+    });
   });
 });
