@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { pathToFileURL } from "node:url";
-import { runValidate, type CommandContext } from "./commands.js";
+import { runList, runValidate, type CommandContext } from "./commands.js";
 
 const defaultContext: CommandContext = {
   cwd: process.cwd(),
@@ -19,6 +19,13 @@ export function createProgram(context: CommandContext = defaultContext): Command
     .name("threadkit")
     .description("File-first portable skill library and exporter for AI coding CLIs.")
     .version("0.1.0");
+
+  program
+    .command("list")
+    .description("List skills in a threadkit library.")
+    .option("--root <path>", "Source library root.")
+    .option("--format <format>", "Output format: text or json.")
+    .action((options) => runList(options, context));
 
   program
     .command("validate")

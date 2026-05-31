@@ -147,4 +147,28 @@ describe("threadkit CLI", () => {
       warnings: []
     });
   });
+
+  it("lists skill summaries as JSON", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync(["node", "threadkit", "list", "--root", root, "--format", "json"]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(JSON.parse(harness.stdout)).toEqual({
+      ok: true,
+      root,
+      skills: [
+        {
+          id: "handoff",
+          name: "Handoff",
+          summary: "Creates a handoff document.",
+          profiles: ["minimal"],
+          status: "draft"
+        }
+      ]
+    });
+  });
 });
