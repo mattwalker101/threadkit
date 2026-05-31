@@ -1,0 +1,15 @@
+# Agent Instructions
+
+## Local Node Version
+
+Before running `corepack pnpm ...` commands in this repository, activate the
+repo's Node version:
+
+```bash
+source ~/.nvm/nvm.sh
+nvm use
+```
+
+The project is locked to Node 24 through `.nvmrc` and `package.json#engines`,
+and CI runs on Node 24.x. If `nvm` is already loaded in the shell, `nvm use` is
+enough.
