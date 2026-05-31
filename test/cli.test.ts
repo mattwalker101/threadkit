@@ -207,4 +207,26 @@ describe("threadkit CLI", () => {
       }
     });
   });
+
+  it("reports a missing skill as a JSON usage fault", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync(["node", "threadkit", "show", "missing-skill", "--root", root, "--format", "json"]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(2);
+    expect(JSON.parse(harness.stdout)).toEqual({
+      ok: false,
+      root,
+      errors: [
+        {
+          code: "unknown-skill",
+          message: "Skill 'missing-skill' was not found."
+        }
+      ],
+      warnings: []
+    });
+  });
 });

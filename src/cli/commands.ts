@@ -21,6 +21,15 @@ interface CliError {
   message: string;
 }
 
+class CliUsageError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
 function getFormat(format: string | undefined): OutputFormat {
   return format === "json" ? "json" : "text";
 }
@@ -42,6 +51,13 @@ function isDefaultRepoRoot(root: string, options: RootOptions, context: CommandC
 }
 
 function normalizeError(error: unknown): CliError {
+  if (error instanceof CliUsageError) {
+    return {
+      code: error.code,
+      message: error.message
+    };
+  }
+
   return {
     code: "validation-error",
     message: error instanceof Error ? error.message : String(error)
@@ -146,7 +162,7 @@ export async function runShow(
     const skill = library.skills.find((candidate) => candidate.id === skillId);
 
     if (!skill) {
-      throw new Error(`Skill '${skillId}' was not found.`);
+      throw new CliUsageError("unknown-skill", `Skill '${skillId}' was not found.`);
     }
 
     context.setExitCode(0);
@@ -159,7 +175,7 @@ export async function runShow(
     context.write(`${skill.metadata.name} (${skill.id})\n\n${skill.body}`);
   } catch (error) {
     const normalized = normalizeError(error);
-    context.setExitCode(1);
+    context.setExitCode(error instanceof CliUsageError ? 2 : 1);
 
     if (format === "json") {
       writeJson(context, { ok: false, root, errors: [normalized], warnings: [] });
