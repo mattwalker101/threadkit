@@ -13,16 +13,21 @@ export interface LoadedSkill {
 export async function loadSkill(args: { root: string; id: string }): Promise<LoadedSkill> {
   const dir = join(args.root, "skills", args.id);
   const metadata = skillSchema.parse(parse(await readFile(join(dir, "skill.yml"), "utf8")));
+  const body = await readFile(join(dir, "body.md"), "utf8");
 
   if (metadata.id !== args.id) {
     throw new Error(`Skill directory '${args.id}' does not match skill id '${metadata.id}'.`);
+  }
+
+  if (body.trim().length === 0) {
+    throw new Error(`Skill '${metadata.id}' has an empty body.md.`);
   }
 
   return {
     id: metadata.id,
     dir,
     metadata,
-    body: await readFile(join(dir, "body.md"), "utf8")
+    body
   };
 }
 

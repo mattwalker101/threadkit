@@ -52,6 +52,61 @@ const expectedCanonicalSkillIds = [
   "handoff"
 ];
 
+const completeTargetsYml = `  claude:
+    enabled: true
+  antigravity:
+    enabled: true
+  codex:
+    enabled: true
+  opencode:
+    enabled: true
+  gemini:
+    enabled: false
+  markdown:
+    enabled: true
+`;
+
+function canonicalSkillYml(args: {
+  id: string;
+  profiles?: string[];
+  targetsYml?: string;
+}): string {
+  return validSkillYml
+    .replaceAll("handoff", args.id)
+    .replace("profiles:\n  - minimal", `profiles:\n${(args.profiles ?? ["minimal", "coding-heavy"]).map((name) => `  - ${name}`).join("\n")}`)
+    .replace("targets:\n  markdown:\n    enabled: true", `targets:\n${args.targetsYml ?? completeTargetsYml}`);
+}
+
+async function writeCanonicalLibrary(root: string, args: { extraSkillId?: string; incompleteTargetSkillId?: string } = {}) {
+  await mkdir(join(root, "skills"), { recursive: true });
+  await mkdir(join(root, "profiles"), { recursive: true });
+
+  const skillIds = args.extraSkillId ? [...expectedCanonicalSkillIds, args.extraSkillId] : expectedCanonicalSkillIds;
+
+  for (const id of skillIds) {
+    await mkdir(join(root, "skills", id), { recursive: true });
+    await writeFile(
+      join(root, "skills", id, "skill.yml"),
+      canonicalSkillYml({
+        id,
+        targetsYml:
+          id === args.incompleteTargetSkillId
+            ? completeTargetsYml.replace("  codex:\n    enabled: true\n", "")
+            : completeTargetsYml
+      })
+    );
+    await writeFile(join(root, "skills", id, "body.md"), `# ${id}\n`);
+  }
+
+  const profileYml = `description: Canonical baseline.
+skills:
+${skillIds.map((id) => `  - ${id}`).join("\n")}
+`;
+
+  await writeFile(join(root, "profiles", "minimal.yml"), `name: minimal\n${profileYml}`);
+  await writeFile(join(root, "profiles", "coding-heavy.yml"), `name: coding-heavy\n${profileYml}`);
+}
+
 describe("core skill loaders", () => {
   it("loads skill metadata and body from skills/<id>", async () => {
     const root = await makeTempRoot();
@@ -80,6 +135,17 @@ describe("core skill loaders", () => {
 
     await expect(loadSkill({ root, id: "handoff-copy" })).rejects.toThrow(
       "Skill directory 'handoff-copy' does not match skill id 'handoff'."
+    );
+  });
+
+  it("rejects a skill with an empty body", async () => {
+    const root = await makeTempRoot();
+    await mkdir(join(root, "skills", "handoff"), { recursive: true });
+    await writeFile(join(root, "skills", "handoff", "skill.yml"), validSkillYml);
+    await writeFile(join(root, "skills", "handoff", "body.md"), " \n\t\n");
+
+    await expect(loadSkill({ root, id: "handoff" })).rejects.toThrow(
+      "Skill 'handoff' has an empty body.md."
     );
   });
 
@@ -206,8 +272,93 @@ describe("library loading", () => {
     });
   });
 
+  it("rejects profile membership that is missing from skill reverse-index metadata", async () => {
+    const root = await makeTempRoot();
+    await mkdir(join(root, "skills", "handoff"), { recursive: true });
+    await mkdir(join(root, "profiles"), { recursive: true });
+    await writeFile(
+      join(root, "skills", "handoff", "skill.yml"),
+      validSkillYml.replace("  - minimal", "  - coding-heavy")
+    );
+    await writeFile(join(root, "skills", "handoff", "body.md"), "# Handoff\n");
+    await writeFile(join(root, "profiles", "minimal.yml"), validProfileYml);
+    await writeFile(
+      join(root, "profiles", "coding-heavy.yml"),
+      validProfileYml.replace("name: minimal", "name: coding-heavy")
+    );
+
+    await expect(loadLibrary(root)).rejects.toThrow(
+      "Profile 'minimal' lists skill 'handoff', but skill metadata does not list profile 'minimal'."
+    );
+  });
+
+  it("rejects skill reverse-index metadata that names a missing profile", async () => {
+    const root = await makeTempRoot();
+    await mkdir(join(root, "skills", "handoff"), { recursive: true });
+    await mkdir(join(root, "profiles"), { recursive: true });
+    await writeFile(
+      join(root, "skills", "handoff", "skill.yml"),
+      validSkillYml.replace("  - minimal", "  - missing-profile")
+    );
+    await writeFile(join(root, "skills", "handoff", "body.md"), "# Handoff\n");
+    await writeFile(join(root, "profiles", "minimal.yml"), validProfileYml);
+
+    await expect(loadLibrary(root)).rejects.toThrow(
+      "Skill 'handoff' metadata references missing profile 'missing-profile'."
+    );
+  });
+
+  it("rejects skill reverse-index metadata that is not reciprocated by the profile", async () => {
+    const root = await makeTempRoot();
+    await mkdir(join(root, "skills", "handoff"), { recursive: true });
+    await mkdir(join(root, "skills", "other-skill"), { recursive: true });
+    await mkdir(join(root, "profiles"), { recursive: true });
+    await writeFile(join(root, "skills", "handoff", "skill.yml"), validSkillYml);
+    await writeFile(join(root, "skills", "handoff", "body.md"), "# Handoff\n");
+    await writeFile(
+      join(root, "skills", "other-skill", "skill.yml"),
+      validSkillYml.replaceAll("handoff", "other-skill")
+    );
+    await writeFile(join(root, "skills", "other-skill", "body.md"), "# Other\n");
+    await writeFile(
+      join(root, "profiles", "minimal.yml"),
+      validProfileYml.replace("  - handoff", "  - other-skill")
+    );
+
+    await expect(loadLibrary(root)).rejects.toThrow(
+      "Skill 'handoff' metadata lists profile 'minimal', but profile 'minimal' does not list skill 'handoff'."
+    );
+  });
+
+  it("rejects unexpected skill directories in canonical validation mode", async () => {
+    const root = await makeTempRoot();
+    await writeCanonicalLibrary(root, { extraSkillId: "extra-skill" });
+
+    await expect(loadLibrary(root, { canonical: true })).rejects.toThrow(
+      "Canonical library contains unexpected skill directories: extra-skill."
+    );
+  });
+
+  it("rejects bundled canonical skills with incomplete target flags", async () => {
+    const root = await makeTempRoot();
+    await writeCanonicalLibrary(root, { incompleteTargetSkillId: "handoff" });
+
+    await expect(loadLibrary(root, { canonical: true })).rejects.toThrow(
+      "Canonical skill 'handoff' is missing target flags: codex."
+    );
+  });
+
+  it("allows non-canonical libraries to declare partial target flags", async () => {
+    const root = await makeTempRoot();
+    await writeCanonicalLibrary(root, { incompleteTargetSkillId: "handoff" });
+
+    await expect(loadLibrary(root)).resolves.toMatchObject({
+      skills: expect.arrayContaining([expect.objectContaining({ id: "handoff" })])
+    });
+  });
+
   it("loads and resolves the repository canonical library", async () => {
-    const library = await loadLibrary(process.cwd());
+    const library = await loadLibrary(process.cwd(), { canonical: true });
     const minimal = library.profiles.find((profile) => profile.name === "minimal");
 
     expect(library.skills.map((skill) => skill.id).sort()).toEqual([...expectedCanonicalSkillIds].sort());
