@@ -196,4 +196,15 @@ describe("library loading", () => {
       profiles: [{ name: "minimal" }]
     });
   });
+
+  it("loads and resolves the repository canonical library", async () => {
+    const library = await loadLibrary(process.cwd());
+    const minimal = library.profiles.find((profile) => profile.name === "minimal");
+
+    expect(library.skills.map((skill) => skill.id)).toContain("handoff");
+    expect(minimal).toBeDefined();
+    expect(resolveProfile({ profile: minimal!, skills: library.skills }).skills.map((skill) => skill.id)).toEqual([
+      "handoff"
+    ]);
+  });
 });
