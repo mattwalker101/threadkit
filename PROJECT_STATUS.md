@@ -2,21 +2,19 @@
 
 ## Current Slice
 
-Slice 6 complete: Markdown Export Boundary.
+Slice 7 complete: Export Target Expansion.
 
-Next slice: expand renderer and target coverage beyond the initial markdown
-export tracer bullet.
+Next slice: continue renderer coverage beyond the shared `skill` format, likely
+the Codex `agents-md` renderer and target.
 
 ## Current Goal
 
-Build broader renderer and target coverage on top of the Slice 6 export
-boundary.
+Build additional pure renderers on top of the expanded target routing boundary.
 
-Slice 6 added `threadkit export markdown --profile <name>` with optional
-`--root`, `--out`, and `--format json` flags. The markdown renderer is pure and
-returns file specs, while filesystem writes happen in the shared export writer.
-The default output root is `dist/`, producing
-`dist/markdown/<profile>.md`.
+Slice 7 added renderer routing by target format and shared `skill` exports for
+`claude` and `antigravity`. Exports remain staged-only under `dist/` or `--out`;
+install safety, manifests, backups, pruning, and foreign-file detection remain
+out of scope.
 
 ## Local Environment
 
