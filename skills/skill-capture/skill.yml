@@ -1,0 +1,40 @@
+id: skill-capture
+name: Skill Capture
+version: 0.1.0
+status: draft
+summary: >
+  Turns repeated agent workflows into canonical reusable skill files and
+  validates their metadata, body structure, and profile fit.
+category: knowledge-management
+triggers:
+  - capture this as a skill
+  - create a reusable skill
+  - write a skill from this workflow
+  - formalize this agent workflow
+profiles:
+  - minimal
+  - coding-heavy
+targets:
+  claude:
+    enabled: true
+  antigravity:
+    enabled: true
+  codex:
+    enabled: true
+  opencode:
+    enabled: true
+  gemini:
+    enabled: false
+  markdown:
+    enabled: true
+safety:
+  allow_shell_commands: true
+  allow_network: false
+  allow_file_writes: true
+  includes_scripts: false
+tags:
+  - skills
+  - workflow
+  - documentation
+risk: low
+owner: matthew

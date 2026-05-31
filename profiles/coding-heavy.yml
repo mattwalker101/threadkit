@@ -1,4 +1,9 @@
 name: coding-heavy
 description: Coding-focused baseline for local AI coding CLI environments.
 skills:
+  - implementation-plan
+  - build-handoff
+  - code-review
+  - debugging-loop
+  - skill-capture
   - handoff

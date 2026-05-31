@@ -43,6 +43,15 @@ skills:
   - handoff
 `;
 
+const expectedCanonicalSkillIds = [
+  "implementation-plan",
+  "build-handoff",
+  "code-review",
+  "debugging-loop",
+  "skill-capture",
+  "handoff"
+];
+
 describe("core skill loaders", () => {
   it("loads skill metadata and body from skills/<id>", async () => {
     const root = await makeTempRoot();
@@ -201,10 +210,10 @@ describe("library loading", () => {
     const library = await loadLibrary(process.cwd());
     const minimal = library.profiles.find((profile) => profile.name === "minimal");
 
-    expect(library.skills.map((skill) => skill.id)).toContain("handoff");
+    expect(library.skills.map((skill) => skill.id).sort()).toEqual([...expectedCanonicalSkillIds].sort());
     expect(minimal).toBeDefined();
     expect(resolveProfile({ profile: minimal!, skills: library.skills }).skills.map((skill) => skill.id)).toEqual([
-      "handoff"
+      ...expectedCanonicalSkillIds
     ]);
   });
 });

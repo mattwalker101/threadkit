@@ -1,0 +1,41 @@
+id: code-review
+name: Code Review
+version: 0.1.0
+status: draft
+summary: >
+  Reviews code changes for correctness, regressions, maintainability, and
+  missing tests, presenting actionable findings first.
+category: quality
+triggers:
+  - review this code
+  - code review
+  - review my changes
+  - inspect this diff
+  - find bugs in this PR
+profiles:
+  - minimal
+  - coding-heavy
+targets:
+  claude:
+    enabled: true
+  antigravity:
+    enabled: true
+  codex:
+    enabled: true
+  opencode:
+    enabled: true
+  gemini:
+    enabled: false
+  markdown:
+    enabled: true
+safety:
+  allow_shell_commands: true
+  allow_network: false
+  allow_file_writes: false
+  includes_scripts: false
+tags:
+  - review
+  - quality
+  - tests
+risk: low
+owner: matthew

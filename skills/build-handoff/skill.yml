@@ -1,0 +1,40 @@
+id: build-handoff
+name: Build Handoff
+version: 0.1.0
+status: draft
+summary: >
+  Creates an implementation-oriented continuation brief from repository state,
+  plan progress, branch or PR context, tests, blockers, and next actions.
+category: coordination
+triggers:
+  - build a handoff
+  - implementation handoff
+  - continue this build later
+  - prepare an engineering handoff
+profiles:
+  - minimal
+  - coding-heavy
+targets:
+  claude:
+    enabled: true
+  antigravity:
+    enabled: true
+  codex:
+    enabled: true
+  opencode:
+    enabled: true
+  gemini:
+    enabled: false
+  markdown:
+    enabled: true
+safety:
+  allow_shell_commands: true
+  allow_network: false
+  allow_file_writes: true
+  includes_scripts: false
+tags:
+  - handoff
+  - implementation
+  - continuity
+risk: low
+owner: matthew

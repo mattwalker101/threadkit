@@ -1,0 +1,40 @@
+id: implementation-plan
+name: Implementation Plan
+version: 0.1.0
+status: draft
+summary: >
+  Converts rough goals, issues, or product specs into an agent-ready
+  implementation plan with scope, approach, files, tests, and assumptions.
+category: planning
+triggers:
+  - write an implementation plan
+  - plan this feature
+  - turn this spec into a plan
+  - make this agent-ready
+profiles:
+  - minimal
+  - coding-heavy
+targets:
+  claude:
+    enabled: true
+  antigravity:
+    enabled: true
+  codex:
+    enabled: true
+  opencode:
+    enabled: true
+  gemini:
+    enabled: false
+  markdown:
+    enabled: true
+safety:
+  allow_shell_commands: false
+  allow_network: false
+  allow_file_writes: true
+  includes_scripts: false
+tags:
+  - planning
+  - implementation
+  - agent-workflow
+risk: low
+owner: matthew

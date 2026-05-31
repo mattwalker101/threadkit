@@ -1,4 +1,9 @@
 name: minimal
 description: Smallest useful baseline for any local AI coding CLI environment.
 skills:
+  - implementation-plan
+  - build-handoff
+  - code-review
+  - debugging-loop
+  - skill-capture
   - handoff
