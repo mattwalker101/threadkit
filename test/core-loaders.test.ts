@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadSkill, loadSkills } from "../src/core/index.js";
+import { loadProfile, loadProfiles, loadSkill, loadSkills } from "../src/core/index.js";
 
 async function makeTempRoot(): Promise<string> {
   return mkdtemp(join(tmpdir(), "threadkit-loaders-"));
@@ -28,6 +28,12 @@ safety:
   allow_file_writes: true
   includes_scripts: false
 tags: []
+`;
+
+const validProfileYml = `name: minimal
+description: Smallest useful baseline.
+skills:
+  - handoff
 `;
 
 describe("core skill loaders", () => {
@@ -73,6 +79,47 @@ describe("core skill loaders", () => {
     await expect(loadSkills(root)).resolves.toMatchObject([
       { id: "alpha-skill" },
       { id: "zeta-skill" }
+    ]);
+  });
+});
+
+describe("core profile loaders", () => {
+  it("loads a profile from profiles/<name>.yml", async () => {
+    const root = await makeTempRoot();
+    await mkdir(join(root, "profiles"), { recursive: true });
+    await writeFile(join(root, "profiles", "minimal.yml"), validProfileYml);
+
+    const profile = await loadProfile({ root, name: "minimal" });
+
+    expect(profile).toMatchObject({
+      name: "minimal",
+      metadata: { name: "minimal", skills: ["handoff"] }
+    });
+    expect(profile.file).toBe(join(root, "profiles", "minimal.yml"));
+  });
+
+  it("rejects a profile when its filename differs from metadata name", async () => {
+    const root = await makeTempRoot();
+    await mkdir(join(root, "profiles"), { recursive: true });
+    await writeFile(join(root, "profiles", "other.yml"), validProfileYml);
+
+    await expect(loadProfile({ root, name: "other" })).rejects.toThrow(
+      "Profile file 'other.yml' does not match profile name 'minimal'."
+    );
+  });
+
+  it("loads all profiles in deterministic name order", async () => {
+    const root = await makeTempRoot();
+    await mkdir(join(root, "profiles"), { recursive: true });
+    await writeFile(join(root, "profiles", "minimal.yml"), validProfileYml);
+    await writeFile(
+      join(root, "profiles", "coding-heavy.yml"),
+      validProfileYml.replace("name: minimal", "name: coding-heavy")
+    );
+
+    await expect(loadProfiles(root)).resolves.toMatchObject([
+      { name: "coding-heavy" },
+      { name: "minimal" }
     ]);
   });
 });
