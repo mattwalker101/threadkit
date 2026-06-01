@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir as defaultHomedir } from "node:os";
 import { dirname, join, isAbsolute, resolve, sep } from "node:path";
@@ -72,6 +72,15 @@ export interface UninstallPlan {
 export interface ApplyInstallPlanResult {
   manifestPath: string;
   files: AppliedInstallFile[];
+}
+
+export interface AppliedUninstallFile extends PlannedUninstallFile {
+  deleted: boolean;
+}
+
+export interface ApplyUninstallPlanResult {
+  manifestPath: string;
+  files: AppliedUninstallFile[];
 }
 
 export class InstallPlanUsageError extends Error {
@@ -446,6 +455,26 @@ export async function buildUninstallPlan(args: {
     manifestPath: manifestPathForBaseDir(args.baseDir),
     files,
     warnings: []
+  };
+}
+
+export async function applyUninstallPlan(args: { plan: UninstallPlan }): Promise<ApplyUninstallPlanResult> {
+  const files: AppliedUninstallFile[] = [];
+
+  for (const planned of args.plan.files) {
+    const applied: AppliedUninstallFile = { ...planned, deleted: false };
+
+    if (planned.action === "delete") {
+      await unlink(planned.path);
+      applied.deleted = true;
+    }
+
+    files.push(applied);
+  }
+
+  return {
+    manifestPath: args.plan.manifestPath,
+    files
   };
 }
 

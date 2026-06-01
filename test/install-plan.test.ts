@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  applyUninstallPlan,
   applyInstallPlan,
   buildPlan,
   buildUninstallPlan,
@@ -555,6 +556,52 @@ describe("uninstall planning", () => {
     await expect(buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir: otherBaseDir })).rejects.toMatchObject({
       code: "install-manifest-base-dir-mismatch"
     });
+  });
+});
+
+describe("uninstall application", () => {
+  it("deletes only files planned for deletion", async () => {
+    const baseDir = await makeTempRoot();
+    const deletePath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const driftedPath = join(baseDir, "skills", "changed", "SKILL.md");
+    const foreignPath = join(baseDir, "skills", "foreign", "SKILL.md");
+    const missingPath = join(baseDir, "skills", "missing", "SKILL.md");
+    const content = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await mkdir(join(baseDir, "skills", "changed"), { recursive: true });
+    await mkdir(join(baseDir, "skills", "foreign"), { recursive: true });
+    await writeFile(deletePath, content);
+    await writeFile(driftedPath, `${content}Edited\n`);
+    await writeFile(foreignPath, "Human file\n");
+
+    const plan = {
+      target: "claude",
+      profile: "minimal",
+      scope: "user" satisfies InstallScope,
+      baseDir,
+      manifestPath: join(baseDir, ".threadkit", "install-manifest.json"),
+      warnings: [],
+      files: [
+        { path: deletePath, relPath: "skills/handoff/SKILL.md", action: "delete", marker: true, sha256: "w" },
+        { path: driftedPath, relPath: "skills/changed/SKILL.md", action: "skip-drifted", marker: true, sha256: "x" },
+        { path: foreignPath, relPath: "skills/foreign/SKILL.md", action: "skip-foreign", marker: false, sha256: "y" },
+        { path: missingPath, relPath: "skills/missing/SKILL.md", action: "missing", marker: true, sha256: "z" }
+      ]
+    };
+
+    const result = await applyUninstallPlan({ plan });
+
+    await expect(stat(deletePath)).rejects.toThrow();
+    expect(await readFile(driftedPath, "utf8")).toContain("Edited");
+    expect(await readFile(foreignPath, "utf8")).toBe("Human file\n");
+    await expect(stat(missingPath)).rejects.toThrow();
+    expect(result.manifestPath).toBe(join(baseDir, ".threadkit", "install-manifest.json"));
+    expect(result.files).toMatchObject([
+      { relPath: "skills/handoff/SKILL.md", action: "delete", deleted: true },
+      { relPath: "skills/changed/SKILL.md", action: "skip-drifted", deleted: false },
+      { relPath: "skills/foreign/SKILL.md", action: "skip-foreign", deleted: false },
+      { relPath: "skills/missing/SKILL.md", action: "missing", deleted: false }
+    ]);
   });
 });
 
