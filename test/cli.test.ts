@@ -1135,4 +1135,258 @@ describe("threadkit CLI", () => {
       files: [{ action: "overwrite-foreign", existingIsForeign: true }]
     });
   });
+
+  it("dry-runs uninstall from an install manifest as JSON", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    await writeValidCustomLibrary(root);
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "uninstall",
+      "claude",
+      "--scope",
+      "project",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(outputPath, "utf8")).toContain(
+      "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->"
+    );
+    expect(JSON.parse(harness.stdout)).toEqual({
+      ok: true,
+      target: "claude",
+      profile: "minimal",
+      scope: "project",
+      baseDir: join(cwd, ".claude", "skills"),
+      dryRun: true,
+      manifestPath: join(cwd, ".claude", "skills", ".threadkit", "install-manifest.json"),
+      files: [
+        {
+          path: outputPath,
+          relPath: "skills/handoff/SKILL.md",
+          action: "delete",
+          marker: true,
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/)
+        }
+      ],
+      warnings: []
+    });
+  });
+
+  it("applies uninstall and deletes unchanged managed files", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    await writeValidCustomLibrary(root);
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "uninstall",
+      "claude",
+      "--scope",
+      "project",
+      "--apply",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    await expect(stat(outputPath)).rejects.toThrow();
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: true,
+      target: "claude",
+      profile: "minimal",
+      scope: "project",
+      dryRun: false,
+      files: [{ action: "delete", relPath: "skills/handoff/SKILL.md", deleted: true }]
+    });
+  });
+
+  it("reports a missing uninstall manifest as a JSON usage fault", async () => {
+    const cwd = await makeTempRoot();
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "uninstall",
+      "claude",
+      "--scope",
+      "project",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(2);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: false,
+      target: "claude",
+      errors: [{ code: "missing-install-manifest" }],
+      warnings: []
+    });
+  });
+
+  it("refuses uninstall when the manifest target does not match", async () => {
+    const cwd = await makeTempRoot();
+    const manifestPath = join(cwd, ".claude", "skills", ".threadkit", "install-manifest.json");
+    await mkdir(join(cwd, ".claude", "skills", ".threadkit"), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          target: "opencode",
+          profile: "minimal",
+          scope: "project",
+          baseDir: join(cwd, ".claude", "skills"),
+          installedAt: "2026-06-01T10-00-00-000Z",
+          files: []
+        },
+        null,
+        2
+      )}\n`
+    );
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "uninstall",
+      "claude",
+      "--scope",
+      "project",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(2);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: false,
+      target: "claude",
+      errors: [{ code: "install-manifest-target-mismatch" }],
+      warnings: []
+    });
+  });
+
+  it("prints text uninstall plans as action and path rows", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    await writeValidCustomLibrary(root);
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync(["node", "threadkit", "uninstall", "claude", "--scope", "project"]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(harness.stdout).toBe(`delete\t${outputPath}\n`);
+  });
+
+  it("skips drifted managed files during apply uninstall", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    await writeValidCustomLibrary(root);
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    await writeFile(
+      outputPath,
+      "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nLocally changed\n"
+    );
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "uninstall",
+      "claude",
+      "--scope",
+      "project",
+      "--apply",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(outputPath, "utf8")).toContain("Locally changed");
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: true,
+      dryRun: false,
+      files: [{ action: "skip-drifted", relPath: "skills/handoff/SKILL.md", deleted: false }]
+    });
+  });
 });
