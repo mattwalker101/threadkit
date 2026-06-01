@@ -55,6 +55,7 @@ export interface RollbackOptions {
   scope?: string;
   format?: string;
   apply?: boolean;
+  force?: boolean;
 }
 
 export interface AuditOptions extends RootOptions {
@@ -598,7 +599,8 @@ export async function runRollback(
       manifest,
       target: resolvedInstall.target,
       scope: resolvedInstall.scope,
-      baseDir: resolvedInstall.baseDir
+      baseDir: resolvedInstall.baseDir,
+      force: options.force === true
     });
 
     if (options.apply !== true) {
@@ -612,6 +614,7 @@ export async function runRollback(
           scope: plan.scope,
           baseDir: plan.baseDir,
           dryRun: true,
+          force: options.force === true,
           manifestPath: plan.manifestPath,
           files: plan.files,
           warnings: plan.warnings
@@ -625,7 +628,7 @@ export async function runRollback(
       return;
     }
 
-    const applied = await applyRollbackPlan({ plan });
+    const applied = await applyRollbackPlan({ plan, force: options.force === true });
     const restored = applied.files.filter((file) => file.restored).length;
 
     context.setExitCode(0);
@@ -638,6 +641,7 @@ export async function runRollback(
         scope: plan.scope,
         baseDir: plan.baseDir,
         dryRun: false,
+        force: options.force === true,
         manifestPath: applied.manifestPath,
         files: applied.files,
         restored,

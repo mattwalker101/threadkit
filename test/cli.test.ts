@@ -1483,6 +1483,7 @@ describe("threadkit CLI", () => {
       scope: "project",
       baseDir: join(cwd, ".claude", "skills"),
       dryRun: true,
+      force: false,
       manifestPath: join(cwd, ".claude", "skills", ".threadkit", "install-manifest.json"),
       files: [
         {
@@ -1653,6 +1654,106 @@ describe("threadkit CLI", () => {
       ok: true,
       restored: 0,
       files: [{ action: "skip-foreign", restored: false }]
+    });
+  });
+
+  it("dry-runs force rollback for drifted managed files", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    await writeValidCustomLibrary(root);
+    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nOld\n");
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    await writeFile(outputPath, "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nUser edit\n");
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "rollback",
+      "claude",
+      "--scope",
+      "project",
+      "--force",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: true,
+      dryRun: true,
+      force: true,
+      files: [{ action: "force-restore", relPath: "skills/handoff/SKILL.md" }]
+    });
+  });
+
+  it("applies force rollback for drifted managed files", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const original = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nOld\n";
+    await writeValidCustomLibrary(root);
+    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, original);
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    await writeFile(outputPath, "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nUser edit\n");
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "rollback",
+      "claude",
+      "--scope",
+      "project",
+      "--apply",
+      "--force",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(outputPath, "utf8")).toBe(original);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: true,
+      dryRun: false,
+      force: true,
+      restored: 1,
+      files: [{ action: "force-restore", restored: true }]
     });
   });
 

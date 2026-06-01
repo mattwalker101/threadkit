@@ -98,6 +98,7 @@ export function createProgram(context: CommandContext = defaultContext): Command
     .option("--scope <scope>", "Install scope: user or project.")
     .option("--format <format>", "Output format: text or json.")
     .option("--apply", "Apply the rollback plan.")
+    .option("--force", "Restore over drifted ThreadKit-managed files.")
     .action((target, options) => runRollback(target, options, context));
 
   return program;
