@@ -1183,6 +1183,7 @@ describe("threadkit CLI", () => {
       scope: "project",
       baseDir: join(cwd, ".claude", "skills"),
       dryRun: true,
+      pruneEmptyDirs: false,
       manifestPath: join(cwd, ".claude", "skills", ".threadkit", "install-manifest.json"),
       files: [
         {
@@ -1193,6 +1194,7 @@ describe("threadkit CLI", () => {
           sha256: expect.stringMatching(/^[a-f0-9]{64}$/)
         }
       ],
+      directories: [],
       warnings: []
     });
   });
@@ -1241,7 +1243,104 @@ describe("threadkit CLI", () => {
       profile: "minimal",
       scope: "project",
       dryRun: false,
+      pruneEmptyDirs: false,
       files: [{ action: "delete", relPath: "skills/handoff/SKILL.md", deleted: true }]
+    });
+  });
+
+  it("dry-runs uninstall directory pruning as JSON", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "uninstall",
+      "claude",
+      "--scope",
+      "project",
+      "--prune-empty-dirs",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: true,
+      dryRun: true,
+      pruneEmptyDirs: true,
+      directories: [
+        { relPath: "skills/handoff", action: "prune" },
+        { relPath: "skills", action: "prune" }
+      ]
+    });
+  });
+
+  it("applies uninstall directory pruning", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "uninstall",
+      "claude",
+      "--scope",
+      "project",
+      "--apply",
+      "--prune-empty-dirs",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    await expect(stat(join(cwd, ".claude", "skills", "skills", "handoff"))).rejects.toThrow();
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: true,
+      dryRun: false,
+      pruneEmptyDirs: true,
+      directories: [
+        { relPath: "skills/handoff", action: "prune", pruned: true },
+        { relPath: "skills", action: "prune", pruned: true }
+      ]
     });
   });
 

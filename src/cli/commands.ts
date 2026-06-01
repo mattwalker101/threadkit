@@ -49,6 +49,7 @@ export interface UninstallOptions {
   scope?: string;
   format?: string;
   apply?: boolean;
+  pruneEmptyDirs?: boolean;
 }
 
 export interface RollbackOptions {
@@ -512,7 +513,8 @@ export async function runUninstall(
       manifest,
       target: resolvedInstall.target,
       scope: resolvedInstall.scope,
-      baseDir: resolvedInstall.baseDir
+      baseDir: resolvedInstall.baseDir,
+      pruneEmptyDirs: options.pruneEmptyDirs === true
     });
 
     if (options.apply !== true) {
@@ -526,8 +528,10 @@ export async function runUninstall(
           scope: plan.scope,
           baseDir: plan.baseDir,
           dryRun: true,
+          pruneEmptyDirs: options.pruneEmptyDirs === true,
           manifestPath: plan.manifestPath,
           files: plan.files,
+          directories: plan.directories,
           warnings: plan.warnings
         });
         return;
@@ -535,6 +539,9 @@ export async function runUninstall(
 
       for (const file of plan.files) {
         context.write(`${file.action}\t${file.path}\n`);
+      }
+      for (const directory of plan.directories) {
+        context.write(`${directory.action}\t${directory.path}\n`);
       }
       return;
     }
@@ -551,8 +558,10 @@ export async function runUninstall(
         scope: plan.scope,
         baseDir: plan.baseDir,
         dryRun: false,
+        pruneEmptyDirs: options.pruneEmptyDirs === true,
         manifestPath: applied.manifestPath,
         files: applied.files,
+        directories: applied.directories,
         warnings: plan.warnings
       });
       return;
@@ -560,6 +569,9 @@ export async function runUninstall(
 
     for (const file of applied.files) {
       context.write(`${file.action}\t${file.path}\n`);
+    }
+    for (const directory of applied.directories) {
+      context.write(`${directory.action}\t${directory.path}\n`);
     }
     context.write(`manifest\t${applied.manifestPath}\n`);
   } catch (error) {

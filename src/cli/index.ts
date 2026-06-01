@@ -89,6 +89,7 @@ export function createProgram(context: CommandContext = defaultContext): Command
     .option("--scope <scope>", "Install scope: user or project.")
     .option("--format <format>", "Output format: text or json.")
     .option("--apply", "Apply the uninstall plan.")
+    .option("--prune-empty-dirs", "Remove empty directories left after uninstalling managed files.")
     .action((target, options) => runUninstall(target, options, context));
 
   program
