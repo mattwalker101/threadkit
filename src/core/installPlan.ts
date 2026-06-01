@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rmdir, unlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir as defaultHomedir } from "node:os";
 import { dirname, join, isAbsolute, resolve, sep } from "node:path";
@@ -117,9 +117,14 @@ export interface AppliedUninstallFile extends PlannedUninstallFile {
   deleted: boolean;
 }
 
+export interface AppliedUninstallDirectory extends PlannedUninstallDirectory {
+  pruned: boolean;
+}
+
 export interface ApplyUninstallPlanResult {
   manifestPath: string;
   files: AppliedUninstallFile[];
+  directories: AppliedUninstallDirectory[];
 }
 
 export interface AppliedRollbackFile extends PlannedRollbackFile {
@@ -628,6 +633,7 @@ export async function buildUninstallPlan(args: {
 
 export async function applyUninstallPlan(args: { plan: UninstallPlan }): Promise<ApplyUninstallPlanResult> {
   const files: AppliedUninstallFile[] = [];
+  const directories: AppliedUninstallDirectory[] = [];
 
   for (const planned of args.plan.files) {
     const outputPath = resolveInsideBaseDir(args.plan.baseDir, planned.relPath);
@@ -666,9 +672,31 @@ export async function applyUninstallPlan(args: { plan: UninstallPlan }): Promise
     files.push(applied);
   }
 
+  for (const planned of args.plan.directories) {
+    const directoryPath = resolveInsideBaseDir(args.plan.baseDir, planned.relPath);
+    const applied: AppliedUninstallDirectory = { ...planned, path: directoryPath, pruned: false };
+
+    if (planned.action === "prune") {
+      try {
+        await rmdir(directoryPath);
+        applied.pruned = true;
+      } catch (error) {
+        const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+        if (code === "ENOTEMPTY" || code === "EEXIST") {
+          applied.action = "skip-nonempty";
+        } else if (code !== "ENOENT") {
+          throw error;
+        }
+      }
+    }
+
+    directories.push(applied);
+  }
+
   return {
     manifestPath: args.plan.manifestPath,
-    files
+    files,
+    directories
   };
 }
 

@@ -848,6 +848,49 @@ describe("uninstall application", () => {
       }
     ]);
   });
+
+  it("prunes empty directories after deleting managed files", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const content = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, content);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedInstalledManifest(baseDir, outputPath, content)
+    });
+    const plan = await buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir, pruneEmptyDirs: true });
+
+    const result = await applyUninstallPlan({ plan });
+
+    await expect(stat(join(baseDir, "skills", "handoff"))).rejects.toThrow();
+    await expect(stat(join(baseDir, "skills"))).rejects.toThrow();
+    expect(result.directories).toMatchObject([
+      { relPath: "skills/handoff", action: "prune", pruned: true },
+      { relPath: "skills", action: "prune", pruned: true }
+    ]);
+  });
+
+  it("does not prune a directory that became nonempty after planning", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const latePath = join(baseDir, "skills", "handoff", "late.md");
+    const content = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, content);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedInstalledManifest(baseDir, outputPath, content)
+    });
+    const plan = await buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir, pruneEmptyDirs: true });
+    await writeFile(latePath, "Human file\n");
+
+    const result = await applyUninstallPlan({ plan });
+
+    expect(await readFile(latePath, "utf8")).toBe("Human file\n");
+    expect(result.directories).toMatchObject([
+      { relPath: "skills/handoff", action: "skip-nonempty", pruned: false },
+      { relPath: "skills", action: "skip-nonempty", pruned: false }
+    ]);
+  });
 });
 
 describe("rollback planning", () => {
