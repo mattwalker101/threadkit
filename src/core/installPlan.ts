@@ -30,6 +30,25 @@ export interface AppliedInstallFile extends PlannedFile {
   backupPath?: string;
 }
 
+export interface InstallManifestFile {
+  path: string;
+  relPath: string;
+  action: InstallAction;
+  sha256: string;
+  marker: boolean;
+  existingIsForeign: boolean;
+  backupPath?: string;
+}
+
+export interface InstallManifest {
+  target: string;
+  profile: string;
+  scope: InstallScope;
+  baseDir: string;
+  installedAt: string;
+  files: InstallManifestFile[];
+}
+
 export interface ApplyInstallPlanResult {
   manifestPath: string;
   files: AppliedInstallFile[];
@@ -147,6 +166,10 @@ function sha256(content: Buffer | string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
+export function manifestPathForBaseDir(baseDir: string): string {
+  return join(baseDir, ".threadkit", "install-manifest.json");
+}
+
 function stripTargetPrefix(target: string, relPath: string): string {
   const prefix = `${target}/`;
   return relPath.startsWith(prefix) ? relPath.slice(prefix.length) : relPath;
@@ -235,6 +258,94 @@ function contentByRelPath(target: string, render: RenderResult): Map<string, Fil
   return files;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isInstallScope(value: unknown): value is InstallScope {
+  return value === "user" || value === "project";
+}
+
+function isInstallAction(value: unknown): value is InstallAction {
+  return (
+    value === "create" ||
+    value === "overwrite" ||
+    value === "unchanged" ||
+    value === "skip-foreign" ||
+    value === "overwrite-foreign"
+  );
+}
+
+function isInstallManifestFile(value: unknown): value is InstallManifestFile {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.path === "string" &&
+    typeof value.relPath === "string" &&
+    isInstallAction(value.action) &&
+    typeof value.sha256 === "string" &&
+    typeof value.marker === "boolean" &&
+    typeof value.existingIsForeign === "boolean" &&
+    (value.backupPath === undefined || typeof value.backupPath === "string")
+  );
+}
+
+function isInstallManifest(value: unknown): value is InstallManifest {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.target === "string" &&
+    typeof value.profile === "string" &&
+    isInstallScope(value.scope) &&
+    typeof value.baseDir === "string" &&
+    typeof value.installedAt === "string" &&
+    Array.isArray(value.files) &&
+    value.files.every(isInstallManifestFile)
+  );
+}
+
+export async function loadInstallManifest(args: { baseDir: string }): Promise<InstallManifest> {
+  const manifestPath = manifestPathForBaseDir(args.baseDir);
+  let raw: string;
+
+  try {
+    raw = await readFile(manifestPath, "utf8");
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+    if (code === "ENOENT") {
+      throw new InstallPlanUsageError(
+        "missing-install-manifest",
+        `Install manifest was not found at '${manifestPath}'.`
+      );
+    }
+
+    throw error;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new InstallPlanUsageError(
+      "invalid-install-manifest",
+      `Install manifest at '${manifestPath}' is not valid JSON.`
+    );
+  }
+
+  if (!isInstallManifest(parsed)) {
+    throw new InstallPlanUsageError(
+      "invalid-install-manifest",
+      `Install manifest at '${manifestPath}' has an invalid shape.`
+    );
+  }
+
+  return parsed;
+}
+
 export async function applyInstallPlan(args: {
   plan: WritePlan;
   render: RenderResult;
@@ -274,8 +385,8 @@ export async function applyInstallPlan(args: {
     appliedFiles.push(applied);
   }
 
-  const manifestPath = join(args.plan.baseDir, ".threadkit", "install-manifest.json");
-  const manifest = {
+  const manifestPath = manifestPathForBaseDir(args.plan.baseDir);
+  const manifest: InstallManifest = {
     target: args.plan.target,
     profile: args.plan.profile,
     scope: args.plan.scope,

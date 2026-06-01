@@ -2,7 +2,14 @@ import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { applyInstallPlan, buildPlan, resolveInstallBaseDir, type InstallScope } from "../src/core/index.js";
+import {
+  applyInstallPlan,
+  buildPlan,
+  InstallPlanUsageError,
+  loadInstallManifest,
+  resolveInstallBaseDir,
+  type InstallScope
+} from "../src/core/index.js";
 import type { RenderResult } from "../src/core/index.js";
 
 async function makeTempRoot(): Promise<string> {
@@ -344,6 +351,52 @@ describe("install application", () => {
       action: "overwrite-foreign",
       existingIsForeign: true,
       backupPath
+    });
+  });
+});
+
+describe("install manifest loading", () => {
+  it("loads a valid install manifest", async () => {
+    const baseDir = await makeTempRoot();
+    const manifest = {
+      target: "claude",
+      profile: "minimal",
+      scope: "user",
+      baseDir,
+      installedAt: "2026-06-01T10-00-00-000Z",
+      files: [
+        {
+          path: join(baseDir, "skills", "handoff", "SKILL.md"),
+          relPath: "skills/handoff/SKILL.md",
+          action: "create",
+          sha256: "a7937b64b8caa58f03721bb6bacf5c78cb235febe0e70b1b84cd99541461a08e",
+          marker: true,
+          existingIsForeign: false
+        }
+      ]
+    };
+    await mkdir(join(baseDir, ".threadkit"), { recursive: true });
+    await writeFile(join(baseDir, ".threadkit", "install-manifest.json"), JSON.stringify(manifest));
+
+    await expect(loadInstallManifest({ baseDir })).resolves.toEqual(manifest);
+  });
+
+  it("throws a usage error when the install manifest is missing", async () => {
+    const baseDir = await makeTempRoot();
+
+    await expect(loadInstallManifest({ baseDir })).rejects.toMatchObject({
+      code: "missing-install-manifest"
+    });
+    await expect(loadInstallManifest({ baseDir })).rejects.toBeInstanceOf(InstallPlanUsageError);
+  });
+
+  it("throws a usage error when the install manifest shape is invalid", async () => {
+    const baseDir = await makeTempRoot();
+    await mkdir(join(baseDir, ".threadkit"), { recursive: true });
+    await writeFile(join(baseDir, ".threadkit", "install-manifest.json"), JSON.stringify({ files: "not an array" }));
+
+    await expect(loadInstallManifest({ baseDir })).rejects.toMatchObject({
+      code: "invalid-install-manifest"
     });
   });
 });
