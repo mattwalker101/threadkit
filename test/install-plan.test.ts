@@ -920,6 +920,54 @@ describe("rollback planning", () => {
     ]);
   });
 
+  it("plans drifted managed files as force-restore when force is enabled", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    const drifted = `${current}Edited\n`;
+    const original = "Original\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, drifted);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedRollbackManifest({ baseDir, outputPath, currentContent: current, originalContent: original })
+    });
+
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir, force: true });
+
+    expect(plan.files).toMatchObject([
+      {
+        relPath: "skills/handoff/SKILL.md",
+        action: "force-restore",
+        marker: true,
+        sha256: sha256(drifted)
+      }
+    ]);
+  });
+
+  it("plans foreign files as skip-foreign when force is enabled", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    const foreign = "Human file\n";
+    const original = "Original\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, foreign);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedRollbackManifest({ baseDir, outputPath, currentContent: current, originalContent: original })
+    });
+
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir, force: true });
+
+    expect(plan.files).toMatchObject([
+      {
+        relPath: "skills/handoff/SKILL.md",
+        action: "skip-foreign",
+        marker: false,
+        sha256: sha256(foreign)
+      }
+    ]);
+  });
+
   it("plans absent and unsafe backup paths without restoring", async () => {
     const baseDir = await makeTempRoot();
     const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");

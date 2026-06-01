@@ -53,6 +53,7 @@ export interface InstallManifest {
 export type UninstallAction = "delete" | "skip-drifted" | "skip-foreign" | "missing";
 export type RollbackAction =
   | "restore"
+  | "force-restore"
   | "skip-drifted"
   | "skip-foreign"
   | "missing"
@@ -624,6 +625,7 @@ export async function buildRollbackPlan(args: {
   target: string;
   scope: InstallScope;
   baseDir: string;
+  force?: boolean;
 }): Promise<RollbackPlan> {
   assertManifestMatches(args);
 
@@ -666,6 +668,10 @@ export async function buildRollbackPlan(args: {
       action = current.action;
       marker = current.marker;
       currentHash = current.sha256;
+
+      if (args.force === true && action === "skip-drifted" && marker) {
+        action = "force-restore";
+      }
     }
 
     files.push({
