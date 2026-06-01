@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
+  auditLibrary,
   getExportTarget,
   getRenderer,
   loadLibrary,
@@ -26,6 +27,10 @@ export interface RootOptions {
 export interface ExportOptions extends RootOptions {
   profile?: string;
   out?: string;
+}
+
+export interface AuditOptions extends RootOptions {
+  strict?: boolean;
 }
 
 interface CliError {
@@ -104,6 +109,43 @@ export async function runValidate(options: RootOptions, context: CommandContext)
     }
 
     context.writeError(`Validation failed: ${normalized.message}\n`);
+  }
+}
+
+export async function runAudit(options: AuditOptions, context: CommandContext): Promise<void> {
+  const root = getRoot(options, context);
+  const format = getFormat(options.format);
+
+  try {
+    const library = await loadLibrary(root, { canonical: isDefaultRepoRoot(root, options, context) });
+    const result = await auditLibrary(library);
+    const exitCode = options.strict === true && result.warnings.length > 0 ? 1 : 0;
+    context.setExitCode(exitCode);
+
+    if (format === "json") {
+      writeJson(context, { ok: true, root, warnings: result.warnings });
+      return;
+    }
+
+    if (result.warnings.length === 0) {
+      context.write(`Library audit passed: ${root}\n`);
+      return;
+    }
+
+    context.write(`Library audit warnings: ${root}\n`);
+    for (const warning of result.warnings) {
+      context.write(`${warning.code}\t${warning.message}\n`);
+    }
+  } catch (error) {
+    const normalized = normalizeError(error);
+    context.setExitCode(1);
+
+    if (format === "json") {
+      writeJson(context, { ok: false, root, errors: [normalized], warnings: [] });
+      return;
+    }
+
+    context.writeError(`Audit failed: ${normalized.message}\n`);
   }
 }
 

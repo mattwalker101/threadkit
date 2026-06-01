@@ -1,6 +1,7 @@
 export * from "./loadSkill.js";
 export * from "./loadProfiles.js";
 export * from "./loadLibrary.js";
+export * from "./auditLibrary.js";
 export * from "./resolveProfile.js";
 export * from "./renderTypes.js";
 export * from "./renderMarkdown.js";
