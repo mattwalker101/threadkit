@@ -2,19 +2,20 @@
 
 ## Current Slice
 
-Slice 7 complete: Export Target Expansion.
+Slice 9 planned: Manifest-Based Uninstall.
 
-Next slice: continue renderer coverage beyond the shared `skill` format, likely
-the Codex `agents-md` renderer and target.
+This slice stacks on PR 17's install apply work. It reads
+`.threadkit/install-manifest.json` and removes only unchanged ThreadKit-managed
+files from the selected target/scope.
 
 ## Current Goal
 
-Build additional pure renderers on top of the expanded target routing boundary.
+Add safe uninstall planning and application without rollback, backup restore,
+directory pruning, or forceful deletion.
 
-Slice 7 added renderer routing by target format and shared `skill` exports for
-`claude` and `antigravity`. Exports remain staged-only under `dist/` or `--out`;
-install safety, manifests, backups, pruning, and foreign-file detection remain
-out of scope.
+The safety invariant remains: ThreadKit must not mutate unmarked foreign files.
+Uninstall also skips drifted generated files whose current hash no longer
+matches the manifest.
 
 ## Local Environment
 
