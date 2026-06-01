@@ -1389,4 +1389,50 @@ describe("threadkit CLI", () => {
       files: [{ action: "skip-drifted", relPath: "skills/handoff/SKILL.md", deleted: false }]
     });
   });
+
+  it("skips foreign files during apply uninstall", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    await writeValidCustomLibrary(root);
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    await writeFile(outputPath, "Human file\n");
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "uninstall",
+      "claude",
+      "--scope",
+      "project",
+      "--apply",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(outputPath, "utf8")).toBe("Human file\n");
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: true,
+      dryRun: false,
+      files: [{ action: "skip-foreign", relPath: "skills/handoff/SKILL.md", deleted: false }]
+    });
+  });
 });
