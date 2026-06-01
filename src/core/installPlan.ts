@@ -462,11 +462,37 @@ export async function applyUninstallPlan(args: { plan: UninstallPlan }): Promise
   const files: AppliedUninstallFile[] = [];
 
   for (const planned of args.plan.files) {
-    const applied: AppliedUninstallFile = { ...planned, deleted: false };
+    const outputPath = resolveInsideBaseDir(args.plan.baseDir, planned.relPath);
+    const applied: AppliedUninstallFile = { ...planned, path: outputPath, deleted: false };
 
     if (planned.action === "delete") {
-      await unlink(planned.path);
-      applied.deleted = true;
+      let existing: Buffer;
+
+      try {
+        existing = await readFile(outputPath);
+      } catch (error) {
+        const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+        if (code !== "ENOENT") {
+          throw error;
+        }
+
+        applied.action = "missing";
+        files.push(applied);
+        continue;
+      }
+
+      const currentHash = sha256(existing);
+      applied.marker = hasManagedMarker(existing);
+      applied.sha256 = currentHash;
+
+      if (!applied.marker) {
+        applied.action = "skip-foreign";
+      } else if (currentHash !== planned.sha256) {
+        applied.action = "skip-drifted";
+      } else {
+        await unlink(outputPath);
+        applied.deleted = true;
+      }
     }
 
     files.push(applied);

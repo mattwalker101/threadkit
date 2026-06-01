@@ -42,6 +42,10 @@ async function writeManifest(baseDir: string, manifest: unknown): Promise<string
   return manifestPath;
 }
 
+function sha256(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
 async function seedInstalledManifest(
   baseDir: string,
   outputPath: string,
@@ -582,7 +586,7 @@ describe("uninstall application", () => {
       manifestPath: join(baseDir, ".threadkit", "install-manifest.json"),
       warnings: [],
       files: [
-        { path: deletePath, relPath: "skills/handoff/SKILL.md", action: "delete", marker: true, sha256: "w" },
+        { path: deletePath, relPath: "skills/handoff/SKILL.md", action: "delete", marker: true, sha256: sha256(content) },
         { path: driftedPath, relPath: "skills/changed/SKILL.md", action: "skip-drifted", marker: true, sha256: "x" },
         { path: foreignPath, relPath: "skills/foreign/SKILL.md", action: "skip-foreign", marker: false, sha256: "y" },
         { path: missingPath, relPath: "skills/missing/SKILL.md", action: "missing", marker: true, sha256: "z" }
@@ -601,6 +605,102 @@ describe("uninstall application", () => {
       { relPath: "skills/changed/SKILL.md", action: "skip-drifted", deleted: false },
       { relPath: "skills/foreign/SKILL.md", action: "skip-foreign", deleted: false },
       { relPath: "skills/missing/SKILL.md", action: "missing", deleted: false }
+    ]);
+  });
+
+  it("ignores a forged planned path outside the base directory", async () => {
+    const baseDir = await makeTempRoot();
+    const outsideDir = await makeTempRoot();
+    const outsidePath = join(outsideDir, "outside.md");
+    const insidePath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const content = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outsidePath, content);
+    await writeFile(insidePath, content);
+
+    const plan = {
+      target: "claude",
+      profile: "minimal",
+      scope: "user" satisfies InstallScope,
+      baseDir,
+      manifestPath: join(baseDir, ".threadkit", "install-manifest.json"),
+      warnings: [],
+      files: [
+        {
+          path: outsidePath,
+          relPath: "skills/handoff/SKILL.md",
+          action: "delete" as const,
+          marker: true,
+          sha256: sha256(content)
+        }
+      ]
+    };
+
+    const result = await applyUninstallPlan({ plan });
+
+    expect(await readFile(outsidePath, "utf8")).toBe(content);
+    await expect(stat(insidePath)).rejects.toThrow();
+    expect(result.files).toMatchObject([
+      {
+        path: insidePath,
+        relPath: "skills/handoff/SKILL.md",
+        action: "delete",
+        deleted: true
+      }
+    ]);
+  });
+
+  it("does not delete a managed file replaced by foreign content after planning", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const original = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    const foreign = "Human file\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, original);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedInstalledManifest(baseDir, outputPath, original)
+    });
+    const plan = await buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir });
+    await writeFile(outputPath, foreign);
+
+    const result = await applyUninstallPlan({ plan });
+
+    expect(await readFile(outputPath, "utf8")).toBe(foreign);
+    expect(result.files).toMatchObject([
+      {
+        relPath: "skills/handoff/SKILL.md",
+        action: "skip-foreign",
+        marker: false,
+        sha256: sha256(foreign),
+        deleted: false
+      }
+    ]);
+  });
+
+  it("does not delete a managed file whose hash changed after planning", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const original = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    const edited = `${original}Edited\n`;
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, original);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedInstalledManifest(baseDir, outputPath, original)
+    });
+    const plan = await buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir });
+    await writeFile(outputPath, edited);
+
+    const result = await applyUninstallPlan({ plan });
+
+    expect(await readFile(outputPath, "utf8")).toBe(edited);
+    expect(result.files).toMatchObject([
+      {
+        relPath: "skills/handoff/SKILL.md",
+        action: "skip-drifted",
+        marker: true,
+        sha256: sha256(edited),
+        deleted: false
+      }
     ]);
   });
 });
