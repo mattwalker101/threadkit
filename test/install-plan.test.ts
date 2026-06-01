@@ -1,10 +1,12 @@
 import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   applyInstallPlan,
   buildPlan,
+  buildUninstallPlan,
   InstallPlanUsageError,
   loadInstallManifest,
   resolveInstallBaseDir,
@@ -30,6 +32,39 @@ function file(content: string, relPath = "claude/skills/handoff/SKILL.md") {
     content,
     marker: true
   };
+}
+
+async function writeManifest(baseDir: string, manifest: unknown): Promise<string> {
+  const manifestPath = join(baseDir, ".threadkit", "install-manifest.json");
+  await mkdir(join(baseDir, ".threadkit"), { recursive: true });
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return manifestPath;
+}
+
+async function seedInstalledManifest(
+  baseDir: string,
+  outputPath: string,
+  content: string,
+  relPath = "skills/handoff/SKILL.md"
+): Promise<string> {
+  await writeManifest(baseDir, {
+    target: "claude",
+    profile: "minimal",
+    scope: "user",
+    baseDir,
+    installedAt: "2026-06-01T10-00-00-000Z",
+    files: [
+      {
+        path: outputPath,
+        relPath,
+        action: "create",
+        sha256: createHash("sha256").update(content).digest("hex"),
+        marker: true,
+        existingIsForeign: false
+      }
+    ]
+  });
+  return baseDir;
 }
 
 describe("install planning", () => {
@@ -397,6 +432,128 @@ describe("install manifest loading", () => {
 
     await expect(loadInstallManifest({ baseDir })).rejects.toMatchObject({
       code: "invalid-install-manifest"
+    });
+  });
+});
+
+describe("uninstall planning", () => {
+  it("plans managed unchanged manifest files for deletion", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const content = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, content);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedInstalledManifest(baseDir, outputPath, content)
+    });
+
+    const plan = await buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir });
+
+    expect(plan).toMatchObject({
+      target: "claude",
+      profile: "minimal",
+      scope: "user",
+      baseDir,
+      manifestPath: join(baseDir, ".threadkit", "install-manifest.json"),
+      warnings: []
+    });
+    expect(plan.files).toMatchObject([
+      {
+        path: outputPath,
+        relPath: "skills/handoff/SKILL.md",
+        action: "delete",
+        marker: true,
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/)
+      }
+    ]);
+  });
+
+  it("plans missing manifest files as missing", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const content = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    const manifest = await loadInstallManifest({
+      baseDir: await seedInstalledManifest(baseDir, outputPath, content)
+    });
+
+    const plan = await buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir });
+
+    expect(plan.files).toMatchObject([
+      {
+        path: outputPath,
+        relPath: "skills/handoff/SKILL.md",
+        action: "missing",
+        marker: true,
+        sha256: createHash("sha256").update(content).digest("hex")
+      }
+    ]);
+  });
+
+  it("plans edited managed files as skip-drifted", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const original = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    const edited = `${original}Edited\n`;
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, edited);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedInstalledManifest(baseDir, outputPath, original)
+    });
+
+    const plan = await buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir });
+
+    expect(plan.files).toMatchObject([
+      {
+        path: outputPath,
+        relPath: "skills/handoff/SKILL.md",
+        action: "skip-drifted",
+        marker: true,
+        sha256: createHash("sha256").update(edited).digest("hex")
+      }
+    ]);
+  });
+
+  it("plans unmarked files as skip-foreign", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const original = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    const foreign = "Human-written file\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, foreign);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedInstalledManifest(baseDir, outputPath, original)
+    });
+
+    const plan = await buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir });
+
+    expect(plan.files).toMatchObject([
+      {
+        path: outputPath,
+        relPath: "skills/handoff/SKILL.md",
+        action: "skip-foreign",
+        marker: false,
+        sha256: createHash("sha256").update(foreign).digest("hex")
+      }
+    ]);
+  });
+
+  it("rejects target, scope, and base directory mismatches", async () => {
+    const baseDir = await makeTempRoot();
+    const otherBaseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const content = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    const manifest = await loadInstallManifest({
+      baseDir: await seedInstalledManifest(baseDir, outputPath, content)
+    });
+
+    await expect(buildUninstallPlan({ manifest, target: "opencode", scope: "user", baseDir })).rejects.toMatchObject({
+      code: "install-manifest-target-mismatch"
+    });
+    await expect(buildUninstallPlan({ manifest, target: "claude", scope: "project", baseDir })).rejects.toMatchObject({
+      code: "install-manifest-scope-mismatch"
+    });
+    await expect(buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir: otherBaseDir })).rejects.toMatchObject({
+      code: "install-manifest-base-dir-mismatch"
     });
   });
 });

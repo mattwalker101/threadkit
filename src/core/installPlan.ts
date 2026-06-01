@@ -49,6 +49,26 @@ export interface InstallManifest {
   files: InstallManifestFile[];
 }
 
+export type UninstallAction = "delete" | "skip-drifted" | "skip-foreign" | "missing";
+
+export interface PlannedUninstallFile {
+  path: string;
+  relPath: string;
+  action: UninstallAction;
+  marker: boolean;
+  sha256: string;
+}
+
+export interface UninstallPlan {
+  target: string;
+  profile: string;
+  scope: InstallScope;
+  baseDir: string;
+  manifestPath: string;
+  files: PlannedUninstallFile[];
+  warnings: string[];
+}
+
 export interface ApplyInstallPlanResult {
   manifestPath: string;
   files: AppliedInstallFile[];
@@ -344,6 +364,89 @@ export async function loadInstallManifest(args: { baseDir: string }): Promise<In
   }
 
   return parsed;
+}
+
+function assertManifestMatches(args: {
+  manifest: InstallManifest;
+  target: string;
+  scope: InstallScope;
+  baseDir: string;
+}): void {
+  if (args.manifest.target !== args.target) {
+    throw new InstallPlanUsageError(
+      "install-manifest-target-mismatch",
+      "Install manifest target does not match uninstall target."
+    );
+  }
+
+  if (args.manifest.scope !== args.scope) {
+    throw new InstallPlanUsageError(
+      "install-manifest-scope-mismatch",
+      "Install manifest scope does not match uninstall scope."
+    );
+  }
+
+  if (resolve(args.manifest.baseDir) !== resolve(args.baseDir)) {
+    throw new InstallPlanUsageError(
+      "install-manifest-base-dir-mismatch",
+      "Install manifest base directory does not match uninstall destination."
+    );
+  }
+}
+
+export async function buildUninstallPlan(args: {
+  manifest: InstallManifest;
+  target: string;
+  scope: InstallScope;
+  baseDir: string;
+}): Promise<UninstallPlan> {
+  assertManifestMatches(args);
+
+  const files: PlannedUninstallFile[] = [];
+
+  for (const file of args.manifest.files) {
+    const outputPath = resolveInsideBaseDir(args.baseDir, file.relPath);
+    let action: UninstallAction = "delete";
+    let marker = file.marker;
+    let currentHash = file.sha256;
+
+    try {
+      const existing = await readFile(outputPath);
+      marker = hasManagedMarker(existing);
+      currentHash = sha256(existing);
+
+      if (!marker) {
+        action = "skip-foreign";
+      } else if (currentHash !== file.sha256) {
+        action = "skip-drifted";
+      }
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+      if (code !== "ENOENT") {
+        throw error;
+      }
+
+      action = "missing";
+    }
+
+    files.push({
+      path: outputPath,
+      relPath: file.relPath,
+      action,
+      marker,
+      sha256: currentHash
+    });
+  }
+
+  return {
+    target: args.manifest.target,
+    profile: args.manifest.profile,
+    scope: args.manifest.scope,
+    baseDir: resolve(args.baseDir),
+    manifestPath: manifestPathForBaseDir(args.baseDir),
+    files,
+    warnings: []
+  };
 }
 
 export async function applyInstallPlan(args: {
