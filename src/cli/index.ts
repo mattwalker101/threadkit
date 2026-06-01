@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { pathToFileURL } from "node:url";
-import { runAudit, runExport, runList, runShow, runValidate, type CommandContext } from "./commands.js";
+import { runAudit, runExport, runInstall, runList, runShow, runValidate, type CommandContext } from "./commands.js";
 
 const defaultContext: CommandContext = {
   cwd: process.cwd(),
@@ -59,6 +59,18 @@ export function createProgram(context: CommandContext = defaultContext): Command
     .option("--out <path>", "Output root.")
     .option("--format <format>", "Output format: text or json.")
     .action((target, options) => runExport(target, options, context));
+
+  program
+    .command("install")
+    .description("Plan installation of a threadkit profile for a target.")
+    .argument("<target>", "Install target.")
+    .option("--profile <name>", "Profile name.")
+    .option("--root <path>", "Source library root.")
+    .option("--scope <scope>", "Install scope: user or project.")
+    .option("--format <format>", "Output format: text or json.")
+    .option("--apply", "Apply the install plan.")
+    .option("--force", "Overwrite foreign files.")
+    .action((target, options) => runInstall(target, options, context));
 
   return program;
 }
