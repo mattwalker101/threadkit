@@ -1435,4 +1435,248 @@ describe("threadkit CLI", () => {
       files: [{ action: "skip-foreign", relPath: "skills/handoff/SKILL.md", deleted: false }]
     });
   });
+
+  it("dry-runs rollback from an install manifest as JSON", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const original = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nOld\n";
+    await writeValidCustomLibrary(root);
+    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, original);
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "rollback",
+      "claude",
+      "--scope",
+      "project",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(JSON.parse(harness.stdout)).toEqual({
+      ok: true,
+      target: "claude",
+      profile: "minimal",
+      scope: "project",
+      baseDir: join(cwd, ".claude", "skills"),
+      dryRun: true,
+      manifestPath: join(cwd, ".claude", "skills", ".threadkit", "install-manifest.json"),
+      files: [
+        {
+          path: outputPath,
+          relPath: "skills/handoff/SKILL.md",
+          action: "restore",
+          marker: true,
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+          backupPath: expect.stringContaining(join(".threadkit", "backups"))
+        }
+      ],
+      warnings: []
+    });
+  });
+
+  it("prints text rollback plans as action and path rows", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    await writeValidCustomLibrary(root);
+    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nOld\n");
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync(["node", "threadkit", "rollback", "claude", "--scope", "project"]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(harness.stdout).toBe(`restore\t${outputPath}\n`);
+  });
+
+  it("applies rollback and restores an overwritten managed file", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const original = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nOld\n";
+    await writeValidCustomLibrary(root);
+    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, original);
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    expect(await readFile(outputPath, "utf8")).not.toBe(original);
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "rollback",
+      "claude",
+      "--scope",
+      "project",
+      "--apply",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(outputPath, "utf8")).toBe(original);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: true,
+      dryRun: false,
+      restored: 1,
+      files: [{ action: "restore", relPath: "skills/handoff/SKILL.md", restored: true }]
+    });
+  });
+
+  it("rolls back a forced foreign overwrite only while generated content is unchanged", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    await writeValidCustomLibrary(root);
+    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, "Human file\n");
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--force",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    const rollback = makeHarness(cwd);
+    await rollback.program.parseAsync([
+      "node",
+      "threadkit",
+      "rollback",
+      "claude",
+      "--scope",
+      "project",
+      "--apply",
+      "--format",
+      "json"
+    ]);
+    expect(await readFile(outputPath, "utf8")).toBe("Human file\n");
+
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--force",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    await writeFile(outputPath, "Human edit after install\n");
+    const driftedRollback = makeHarness(cwd);
+    await driftedRollback.program.parseAsync([
+      "node",
+      "threadkit",
+      "rollback",
+      "claude",
+      "--scope",
+      "project",
+      "--apply",
+      "--format",
+      "json"
+    ]);
+
+    expect(await readFile(outputPath, "utf8")).toBe("Human edit after install\n");
+    expect(JSON.parse(driftedRollback.stdout)).toMatchObject({
+      ok: true,
+      restored: 0,
+      files: [{ action: "skip-foreign", restored: false }]
+    });
+  });
+
+  it("reports a missing rollback manifest as a JSON usage fault", async () => {
+    const cwd = await makeTempRoot();
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "rollback",
+      "claude",
+      "--scope",
+      "project",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(2);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: false,
+      target: "claude",
+      errors: [{ code: "missing-install-manifest" }],
+      warnings: []
+    });
+  });
 });

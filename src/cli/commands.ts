@@ -3,8 +3,10 @@ import { join, resolve } from "node:path";
 import {
   auditLibrary,
   applyInstallPlan,
+  applyRollbackPlan,
   applyUninstallPlan,
   buildPlan,
+  buildRollbackPlan,
   buildUninstallPlan,
   getExportTarget,
   getRenderer,
@@ -44,6 +46,12 @@ export interface InstallOptions extends RootOptions {
 }
 
 export interface UninstallOptions {
+  scope?: string;
+  format?: string;
+  apply?: boolean;
+}
+
+export interface RollbackOptions {
   scope?: string;
   format?: string;
   apply?: boolean;
@@ -568,5 +576,94 @@ export async function runUninstall(
     }
 
     context.writeError(`Uninstall failed: ${normalized.message}\n`);
+  }
+}
+
+export async function runRollback(
+  targetName: string,
+  options: RollbackOptions,
+  context: CommandContext
+): Promise<void> {
+  const format = getFormat(options.format);
+
+  try {
+    const resolvedInstall = resolveInstallBaseDir({
+      targetName,
+      scope: options.scope,
+      cwd: context.cwd,
+      env: process.env
+    });
+    const manifest = await loadInstallManifest({ baseDir: resolvedInstall.baseDir });
+    const plan = await buildRollbackPlan({
+      manifest,
+      target: resolvedInstall.target,
+      scope: resolvedInstall.scope,
+      baseDir: resolvedInstall.baseDir
+    });
+
+    if (options.apply !== true) {
+      context.setExitCode(0);
+
+      if (format === "json") {
+        writeJson(context, {
+          ok: true,
+          target: plan.target,
+          profile: plan.profile,
+          scope: plan.scope,
+          baseDir: plan.baseDir,
+          dryRun: true,
+          manifestPath: plan.manifestPath,
+          files: plan.files,
+          warnings: plan.warnings
+        });
+        return;
+      }
+
+      for (const file of plan.files) {
+        context.write(`${file.action}\t${file.path}\n`);
+      }
+      return;
+    }
+
+    const applied = await applyRollbackPlan({ plan });
+    const restored = applied.files.filter((file) => file.restored).length;
+
+    context.setExitCode(0);
+
+    if (format === "json") {
+      writeJson(context, {
+        ok: true,
+        target: plan.target,
+        profile: plan.profile,
+        scope: plan.scope,
+        baseDir: plan.baseDir,
+        dryRun: false,
+        manifestPath: applied.manifestPath,
+        files: applied.files,
+        restored,
+        warnings: plan.warnings
+      });
+      return;
+    }
+
+    for (const file of applied.files) {
+      context.write(`${file.action}\t${file.path}\n`);
+    }
+    context.write(`manifest\t${applied.manifestPath}\n`);
+  } catch (error) {
+    const normalized = normalizeError(error);
+    context.setExitCode(isUsageError(error) ? 2 : 1);
+
+    if (format === "json") {
+      writeJson(context, {
+        ok: false,
+        target: targetName,
+        errors: [normalized],
+        warnings: []
+      });
+      return;
+    }
+
+    context.writeError(`Rollback failed: ${normalized.message}\n`);
   }
 }

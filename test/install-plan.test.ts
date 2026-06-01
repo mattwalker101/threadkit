@@ -1,13 +1,15 @@
 import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   applyUninstallPlan,
   applyInstallPlan,
   buildPlan,
+  buildRollbackPlan,
   buildUninstallPlan,
+  applyRollbackPlan,
   InstallPlanUsageError,
   loadInstallManifest,
   resolveInstallBaseDir,
@@ -70,6 +72,49 @@ async function seedInstalledManifest(
     ]
   });
   return baseDir;
+}
+
+async function seedRollbackManifest(args: {
+  baseDir: string;
+  outputPath: string;
+  currentContent: string;
+  originalContent?: string;
+  relPath?: string;
+  installAction?: "create" | "overwrite" | "unchanged" | "skip-foreign" | "overwrite-foreign";
+  backupPath?: string;
+}): Promise<string> {
+  const relPath = args.relPath ?? "skills/handoff/SKILL.md";
+  const backupPath =
+    args.backupPath ??
+    (args.originalContent === undefined
+      ? undefined
+      : join(args.baseDir, ".threadkit", "backups", "2026-06-01T10-00-00-000Z", relPath));
+
+  if (args.originalContent !== undefined && backupPath !== undefined) {
+    await mkdir(dirname(backupPath), { recursive: true });
+    await writeFile(backupPath, args.originalContent);
+  }
+
+  await writeManifest(args.baseDir, {
+    target: "claude",
+    profile: "minimal",
+    scope: "user",
+    baseDir: args.baseDir,
+    installedAt: "2026-06-01T10-00-00-000Z",
+    files: [
+      {
+        path: args.outputPath,
+        relPath,
+        action: args.installAction ?? "overwrite",
+        sha256: sha256(args.currentContent),
+        marker: true,
+        existingIsForeign: false,
+        ...(backupPath === undefined ? {} : { backupPath })
+      }
+    ]
+  });
+
+  return args.baseDir;
 }
 
 describe("install planning", () => {
@@ -701,6 +746,244 @@ describe("uninstall application", () => {
         sha256: sha256(edited),
         deleted: false
       }
+    ]);
+  });
+});
+
+describe("rollback planning", () => {
+  it("plans backed-up unchanged managed overwrites as restore", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const original = "Human file\n";
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, current);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedRollbackManifest({ baseDir, outputPath, currentContent: current, originalContent: original })
+    });
+
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir });
+
+    expect(plan).toMatchObject({
+      target: "claude",
+      profile: "minimal",
+      scope: "user",
+      baseDir,
+      manifestPath: join(baseDir, ".threadkit", "install-manifest.json"),
+      warnings: []
+    });
+    expect(plan.files).toMatchObject([
+      {
+        path: outputPath,
+        relPath: "skills/handoff/SKILL.md",
+        action: "restore",
+        marker: true,
+        sha256: sha256(current),
+        backupPath: join(baseDir, ".threadkit", "backups", "2026-06-01T10-00-00-000Z", "skills", "handoff", "SKILL.md")
+      }
+    ]);
+  });
+
+  it("plans created and unchanged files with no backup as no-backup", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, current);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedRollbackManifest({
+        baseDir,
+        outputPath,
+        currentContent: current,
+        installAction: "create"
+      })
+    });
+
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir });
+
+    expect(plan.files).toMatchObject([{ action: "no-backup", relPath: "skills/handoff/SKILL.md" }]);
+  });
+
+  it("plans drifted, foreign, and missing target files safely", async () => {
+    const baseDir = await makeTempRoot();
+    const driftedPath = join(baseDir, "skills", "drifted", "SKILL.md");
+    const foreignPath = join(baseDir, "skills", "foreign", "SKILL.md");
+    const missingPath = join(baseDir, "skills", "missing", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    const drifted = `${current}Edited\n`;
+    await mkdir(join(baseDir, "skills", "drifted"), { recursive: true });
+    await mkdir(join(baseDir, "skills", "foreign"), { recursive: true });
+    await writeFile(driftedPath, drifted);
+    await writeFile(foreignPath, "Human file\n");
+    const backupPath = join(baseDir, ".threadkit", "backups", "2026-06-01T10-00-00-000Z", "skills", "handoff", "SKILL.md");
+    await mkdir(dirname(backupPath), { recursive: true });
+    await writeFile(backupPath, "Original\n");
+    await writeManifest(baseDir, {
+      target: "claude",
+      profile: "minimal",
+      scope: "user",
+      baseDir,
+      installedAt: "2026-06-01T10-00-00-000Z",
+      files: [
+        {
+          path: driftedPath,
+          relPath: "skills/drifted/SKILL.md",
+          action: "overwrite",
+          sha256: sha256(current),
+          marker: true,
+          existingIsForeign: false,
+          backupPath
+        },
+        {
+          path: foreignPath,
+          relPath: "skills/foreign/SKILL.md",
+          action: "overwrite",
+          sha256: sha256(current),
+          marker: true,
+          existingIsForeign: false,
+          backupPath
+        },
+        {
+          path: missingPath,
+          relPath: "skills/missing/SKILL.md",
+          action: "overwrite",
+          sha256: sha256(current),
+          marker: true,
+          existingIsForeign: false,
+          backupPath
+        }
+      ]
+    });
+    const manifest = await loadInstallManifest({ baseDir });
+
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir });
+
+    expect(plan.files).toMatchObject([
+      { relPath: "skills/drifted/SKILL.md", action: "skip-drifted", marker: true, sha256: sha256(drifted) },
+      { relPath: "skills/foreign/SKILL.md", action: "skip-foreign", marker: false, sha256: sha256("Human file\n") },
+      { relPath: "skills/missing/SKILL.md", action: "missing", marker: true, sha256: sha256(current) }
+    ]);
+  });
+
+  it("plans absent and unsafe backup paths without restoring", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, current);
+
+    await writeManifest(baseDir, {
+      target: "claude",
+      profile: "minimal",
+      scope: "user",
+      baseDir,
+      installedAt: "2026-06-01T10-00-00-000Z",
+      files: [
+        {
+          path: outputPath,
+          relPath: "skills/missing-backup/SKILL.md",
+          action: "overwrite",
+          sha256: sha256(current),
+          marker: true,
+          existingIsForeign: false,
+          backupPath: join(baseDir, ".threadkit", "backups", "2026-06-01T10-00-00-000Z", "missing.md")
+        },
+        {
+          path: outputPath,
+          relPath: "skills/unsafe/SKILL.md",
+          action: "overwrite",
+          sha256: sha256(current),
+          marker: true,
+          existingIsForeign: false,
+          backupPath: join(baseDir, ".threadkit", "not-backups", "old.md")
+        }
+      ]
+    });
+    const manifest = await loadInstallManifest({ baseDir });
+
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir });
+
+    expect(plan.files).toMatchObject([
+      { relPath: "skills/missing-backup/SKILL.md", action: "missing-backup" },
+      { relPath: "skills/unsafe/SKILL.md", action: "unsafe-backup-path" }
+    ]);
+  });
+});
+
+describe("rollback application", () => {
+  it("restores backup content only for unchanged managed files", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const original = "Human file\n";
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, current);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedRollbackManifest({ baseDir, outputPath, currentContent: current, originalContent: original })
+    });
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir });
+
+    const result = await applyRollbackPlan({ plan });
+
+    expect(await readFile(outputPath, "utf8")).toBe(original);
+    expect(result.manifestPath).toBe(join(baseDir, ".threadkit", "install-manifest.json"));
+    expect(result.files).toMatchObject([
+      { relPath: "skills/handoff/SKILL.md", action: "restore", restored: true }
+    ]);
+  });
+
+  it("rechecks drift and foreign state after planning", async () => {
+    const baseDir = await makeTempRoot();
+    const driftedPath = join(baseDir, "skills", "drifted", "SKILL.md");
+    const foreignPath = join(baseDir, "skills", "foreign", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    const original = "Original\n";
+    await mkdir(join(baseDir, "skills", "drifted"), { recursive: true });
+    await mkdir(join(baseDir, "skills", "foreign"), { recursive: true });
+    await writeFile(driftedPath, current);
+    await writeFile(foreignPath, current);
+    const backupPath = join(baseDir, ".threadkit", "backups", "2026-06-01T10-00-00-000Z", "skills", "handoff", "SKILL.md");
+    await mkdir(dirname(backupPath), { recursive: true });
+    await writeFile(backupPath, original);
+    await writeManifest(baseDir, {
+      target: "claude",
+      profile: "minimal",
+      scope: "user",
+      baseDir,
+      installedAt: "2026-06-01T10-00-00-000Z",
+      files: [
+        {
+          path: driftedPath,
+          relPath: "skills/drifted/SKILL.md",
+          action: "overwrite",
+          sha256: sha256(current),
+          marker: true,
+          existingIsForeign: false,
+          backupPath
+        },
+        {
+          path: foreignPath,
+          relPath: "skills/foreign/SKILL.md",
+          action: "overwrite",
+          sha256: sha256(current),
+          marker: true,
+          existingIsForeign: false,
+          backupPath
+        }
+      ]
+    });
+    const manifest = await loadInstallManifest({ baseDir });
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir });
+    await writeFile(driftedPath, `${current}Edited\n`);
+    await writeFile(foreignPath, "Human file\n");
+
+    const result = await applyRollbackPlan({ plan });
+
+    expect(await readFile(driftedPath, "utf8")).toContain("Edited");
+    expect(await readFile(foreignPath, "utf8")).toBe("Human file\n");
+    expect(result.files).toMatchObject([
+      { relPath: "skills/drifted/SKILL.md", action: "skip-drifted", restored: false },
+      { relPath: "skills/foreign/SKILL.md", action: "skip-foreign", restored: false }
     ]);
   });
 });
