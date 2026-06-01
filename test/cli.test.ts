@@ -257,6 +257,117 @@ describe("threadkit CLI", () => {
     expect(harness.stdout).toBe(`Library is valid: ${root}\n`);
   });
 
+  it("audits a valid library as JSON without failing on warnings", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    await writeFile(
+      join(root, "skills", "handoff", "skill.yml"),
+      validSkillYml.replace("  - create a handoff", "  - help")
+    );
+    const harness = makeHarness();
+
+    await harness.program.parseAsync(["node", "threadkit", "audit", "--root", root, "--format", "json"]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(JSON.parse(harness.stdout)).toEqual({
+      ok: true,
+      root,
+      warnings: [
+        {
+          code: "missing-output-format-anchor",
+          message: "Skill 'handoff' is missing a '## Output format' section.",
+          skill: "handoff"
+        },
+        {
+          code: "missing-what-not-to-do-anchor",
+          message: "Skill 'handoff' is missing a '## What not to do' section.",
+          skill: "handoff"
+        },
+        {
+          code: "weak-trigger",
+          message: "Skill 'handoff' has a low-information trigger: 'help'.",
+          skill: "handoff"
+        }
+      ]
+    });
+  });
+
+  it("maps audit warnings to exit 1 in strict mode without converting warnings to errors", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "audit",
+      "--root",
+      root,
+      "--strict",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(1);
+    expect(JSON.parse(harness.stdout)).toEqual({
+      ok: true,
+      root,
+      warnings: [
+        {
+          code: "missing-output-format-anchor",
+          message: "Skill 'handoff' is missing a '## Output format' section.",
+          skill: "handoff"
+        },
+        {
+          code: "missing-what-not-to-do-anchor",
+          message: "Skill 'handoff' is missing a '## What not to do' section.",
+          skill: "handoff"
+        }
+      ]
+    });
+  });
+
+  it("reports audit validation failures as JSON and exits 1", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    await writeFile(join(root, "skills", "handoff", "body.md"), " \n");
+    const harness = makeHarness();
+
+    await harness.program.parseAsync(["node", "threadkit", "audit", "--root", root, "--format", "json"]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(1);
+    expect(JSON.parse(harness.stdout)).toEqual({
+      ok: false,
+      root,
+      errors: [
+        {
+          code: "validation-error",
+          message: "Skill 'handoff' has an empty body.md."
+        }
+      ],
+      warnings: []
+    });
+  });
+
+  it("audits a clean library with human-readable output", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    await writeFile(
+      join(root, "skills", "handoff", "body.md"),
+      "# Handoff\n\n## Output format\n\nPlain text.\n\n## What not to do\n\nDo not omit context.\n"
+    );
+    const harness = makeHarness();
+
+    await harness.program.parseAsync(["node", "threadkit", "audit", "--root", root]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(harness.stdout).toBe(`Library audit passed: ${root}\n`);
+  });
+
   it("lists skills with human-readable output", async () => {
     const root = await makeTempRoot();
     await writeValidCustomLibrary(root);
