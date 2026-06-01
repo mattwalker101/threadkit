@@ -1014,6 +1014,7 @@ describe("threadkit CLI", () => {
       files: [{ action: "create", relPath: "skills/handoff/SKILL.md" }]
     });
     expect(JSON.parse(await readFile(output.manifestPath, "utf8"))).toMatchObject({
+      schemaVersion: 1,
       target: "claude",
       profile: "minimal",
       files: [{ action: "create", relPath: "skills/handoff/SKILL.md" }]

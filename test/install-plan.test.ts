@@ -316,6 +316,7 @@ describe("install application", () => {
     });
     expect(result.files[0]).not.toHaveProperty("backupPath");
     expect(JSON.parse(await readFile(result.manifestPath, "utf8"))).toMatchObject({
+      schemaVersion: 1,
       target: "claude",
       profile: "minimal",
       scope: "user",

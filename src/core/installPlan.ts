@@ -794,6 +794,7 @@ export async function applyInstallPlan(args: {
 
   const manifestPath = manifestPathForBaseDir(args.plan.baseDir);
   const manifest: InstallManifest = {
+    schemaVersion: 1,
     target: args.plan.target,
     profile: args.plan.profile,
     scope: args.plan.scope,
