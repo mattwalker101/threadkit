@@ -31,6 +31,23 @@ export const exportTargets = {
       user: "~/.gemini/skills",
       project: "./.agents/skills"
     }
+  },
+  codex: {
+    name: "codex",
+    format: "agents-md",
+    distSubdir: "codex",
+    paths: {
+      project: "./AGENTS.md"
+    }
+  },
+  opencode: {
+    name: "opencode",
+    format: "opencode-command",
+    distSubdir: "opencode",
+    paths: {
+      user: "~/.config/opencode/command",
+      project: "./.opencode/command"
+    }
   }
 } as const satisfies Record<string, ExportTarget>;
 
