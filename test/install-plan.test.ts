@@ -1035,6 +1035,202 @@ describe("rollback application", () => {
     ]);
   });
 
+  it("force restores drifted managed files after apply-time recheck", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    const plannedDrift = `${current}Edited before plan\n`;
+    const applyTimeDrift = `${current}Edited after plan\n`;
+    const original = "Original\n";
+    const applyTimeBackup = "Original re-read at apply\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, plannedDrift);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedRollbackManifest({ baseDir, outputPath, currentContent: current, originalContent: original })
+    });
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir, force: true });
+    await writeFile(outputPath, applyTimeDrift);
+    await writeFile(plan.files[0]!.backupPath!, applyTimeBackup);
+
+    const result = await applyRollbackPlan({ plan, force: true });
+
+    expect(await readFile(outputPath, "utf8")).toBe(applyTimeBackup);
+    expect(result.files).toMatchObject([
+      {
+        relPath: "skills/handoff/SKILL.md",
+        action: "force-restore",
+        marker: true,
+        sha256: sha256(applyTimeDrift),
+        restored: true
+      }
+    ]);
+  });
+
+  it("does not apply a planned force restore without force when drift is unchanged since planning", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    const plannedDrift = `${current}Edited before plan\n`;
+    const original = "Original\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, plannedDrift);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedRollbackManifest({ baseDir, outputPath, currentContent: current, originalContent: original })
+    });
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir, force: true });
+
+    const result = await applyRollbackPlan({ plan });
+
+    expect(await readFile(outputPath, "utf8")).toBe(plannedDrift);
+    expect(result.files).toMatchObject([
+      {
+        relPath: "skills/handoff/SKILL.md",
+        action: "skip-drifted",
+        marker: true,
+        sha256: sha256(plannedDrift),
+        restored: false
+      }
+    ]);
+  });
+
+  it("applies a planned force restore with force when drift is unchanged since planning", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    const plannedDrift = `${current}Edited before plan\n`;
+    const original = "Original\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, plannedDrift);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedRollbackManifest({ baseDir, outputPath, currentContent: current, originalContent: original })
+    });
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir, force: true });
+
+    const result = await applyRollbackPlan({ plan, force: true });
+
+    expect(await readFile(outputPath, "utf8")).toBe(original);
+    expect(result.files).toMatchObject([
+      {
+        relPath: "skills/handoff/SKILL.md",
+        action: "force-restore",
+        marker: true,
+        sha256: sha256(plannedDrift),
+        restored: true
+      }
+    ]);
+  });
+
+  it("does not force restore a malformed force plan missing installed sha", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    const plannedDrift = `${current}Edited before plan\n`;
+    const original = "Original\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, plannedDrift);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedRollbackManifest({ baseDir, outputPath, currentContent: current, originalContent: original })
+    });
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir, force: true });
+    delete plan.files[0]!.installedSha256;
+
+    const result = await applyRollbackPlan({ plan, force: true });
+
+    expect(await readFile(outputPath, "utf8")).toBe(plannedDrift);
+    expect(result.files).toMatchObject([
+      {
+        relPath: "skills/handoff/SKILL.md",
+        action: "skip-current",
+        restored: false
+      }
+    ]);
+  });
+
+  it("does not apply a planned force restore without force when the file returns to installed content", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    const plannedDrift = `${current}Edited before plan\n`;
+    const original = "Original\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, plannedDrift);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedRollbackManifest({ baseDir, outputPath, currentContent: current, originalContent: original })
+    });
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir, force: true });
+    await writeFile(outputPath, current);
+
+    const result = await applyRollbackPlan({ plan });
+
+    expect(await readFile(outputPath, "utf8")).toBe(current);
+    expect(result.files).toMatchObject([
+      {
+        relPath: "skills/handoff/SKILL.md",
+        action: "skip-current",
+        marker: true,
+        sha256: sha256(current),
+        restored: false
+      }
+    ]);
+  });
+
+  it("does not apply a planned force restore with force when the file returns to installed content", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    const plannedDrift = `${current}Edited before plan\n`;
+    const original = "Original\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, plannedDrift);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedRollbackManifest({ baseDir, outputPath, currentContent: current, originalContent: original })
+    });
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir, force: true });
+    await writeFile(outputPath, current);
+
+    const result = await applyRollbackPlan({ plan, force: true });
+
+    expect(await readFile(outputPath, "utf8")).toBe(current);
+    expect(result.files).toMatchObject([
+      {
+        relPath: "skills/handoff/SKILL.md",
+        action: "skip-current",
+        marker: true,
+        sha256: sha256(current),
+        restored: false
+      }
+    ]);
+  });
+
+  it("does not force restore a file that became foreign after planning", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    const plannedDrift = `${current}Edited before plan\n`;
+    const foreign = "Human file\n";
+    const original = "Original\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, plannedDrift);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedRollbackManifest({ baseDir, outputPath, currentContent: current, originalContent: original })
+    });
+    const plan = await buildRollbackPlan({ manifest, target: "claude", scope: "user", baseDir, force: true });
+    await writeFile(outputPath, foreign);
+
+    const result = await applyRollbackPlan({ plan, force: true });
+
+    expect(await readFile(outputPath, "utf8")).toBe(foreign);
+    expect(result.files).toMatchObject([
+      {
+        relPath: "skills/handoff/SKILL.md",
+        action: "skip-foreign",
+        marker: false,
+        sha256: sha256(foreign),
+        restored: false
+      }
+    ]);
+  });
+
   it("rechecks drift and foreign state after planning", async () => {
     const baseDir = await makeTempRoot();
     const driftedPath = join(baseDir, "skills", "drifted", "SKILL.md");

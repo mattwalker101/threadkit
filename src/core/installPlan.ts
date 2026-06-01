@@ -54,6 +54,7 @@ export type UninstallAction = "delete" | "skip-drifted" | "skip-foreign" | "miss
 export type RollbackAction =
   | "restore"
   | "force-restore"
+  | "skip-current"
   | "skip-drifted"
   | "skip-foreign"
   | "missing"
@@ -85,6 +86,7 @@ export interface PlannedRollbackFile {
   action: RollbackAction;
   marker: boolean;
   sha256: string;
+  installedSha256?: string;
   backupPath?: string;
 }
 
@@ -680,6 +682,7 @@ export async function buildRollbackPlan(args: {
       action,
       marker,
       sha256: currentHash,
+      ...(action === "force-restore" ? { installedSha256: file.sha256 } : {}),
       ...(backupPath === undefined ? {} : { backupPath })
     });
   }
@@ -695,14 +698,21 @@ export async function buildRollbackPlan(args: {
   };
 }
 
-export async function applyRollbackPlan(args: { plan: RollbackPlan }): Promise<ApplyRollbackPlanResult> {
+export async function applyRollbackPlan(args: { plan: RollbackPlan; force?: boolean }): Promise<ApplyRollbackPlanResult> {
   const files: AppliedRollbackFile[] = [];
 
   for (const planned of args.plan.files) {
     const outputPath = resolveInsideBaseDir(args.plan.baseDir, planned.relPath);
     const applied: AppliedRollbackFile = { ...planned, path: outputPath, restored: false };
 
-    if (planned.action === "restore") {
+    if (planned.action === "restore" || planned.action === "force-restore") {
+      const expectedSha256 = planned.action === "force-restore" ? planned.installedSha256 : planned.sha256;
+      if (expectedSha256 === undefined) {
+        applied.action = "skip-current";
+        files.push(applied);
+        continue;
+      }
+
       if (planned.backupPath === undefined) {
         applied.action = "no-backup";
         files.push(applied);
@@ -736,14 +746,23 @@ export async function applyRollbackPlan(args: { plan: RollbackPlan }): Promise<A
 
       const current = await currentRollbackState({
         outputPath,
-        expectedSha256: planned.sha256,
+        expectedSha256,
         fallbackMarker: planned.marker
       });
-      applied.action = current.action;
+      if (planned.action === "force-restore") {
+        applied.action =
+          args.force === true && current.action === "skip-drifted" && current.marker
+            ? "force-restore"
+            : current.action === "restore"
+              ? "skip-current"
+              : current.action;
+      } else {
+        applied.action = current.action;
+      }
       applied.marker = current.marker;
       applied.sha256 = current.sha256;
 
-      if (applied.action === "restore") {
+      if (applied.action === "restore" || applied.action === "force-restore") {
         await mkdir(dirname(outputPath), { recursive: true });
         await writeFile(outputPath, backup);
         applied.restored = true;
