@@ -975,10 +975,95 @@ describe("threadkit CLI", () => {
     });
   });
 
-  it("rejects install apply in the dry-run slice", async () => {
+  it("applies a claude install, writes files, and reports manifest metadata", async () => {
     const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
-    const harness = makeHarness();
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    const output = JSON.parse(harness.stdout);
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(outputPath, "utf8")).toContain(
+      "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->"
+    );
+    expect(output).toMatchObject({
+      ok: true,
+      root,
+      target: "claude",
+      profile: "minimal",
+      dryRun: false,
+      manifestPath: join(cwd, ".claude", "skills", ".threadkit", "install-manifest.json"),
+      files: [{ action: "create", relPath: "skills/handoff/SKILL.md" }]
+    });
+    expect(JSON.parse(await readFile(output.manifestPath, "utf8"))).toMatchObject({
+      target: "claude",
+      profile: "minimal",
+      files: [{ action: "create", relPath: "skills/handoff/SKILL.md" }]
+    });
+  });
+
+  it("refuses apply when foreign files are blocked and leaves them untouched", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    await writeValidCustomLibrary(root);
+    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, "Human file\n");
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(1);
+    expect(await readFile(outputPath, "utf8")).toBe("Human file\n");
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: true,
+      dryRun: true,
+      files: [{ action: "skip-foreign", existingIsForeign: true }]
+    });
+    await expect(stat(join(cwd, ".claude", "skills", ".threadkit", "install-manifest.json"))).rejects.toThrow();
+  });
+
+  it("applies forced foreign overwrites with backups and manifest metadata", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    await writeValidCustomLibrary(root);
+    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, "Human file\n");
+    const harness = makeHarness(cwd);
 
     await harness.program.parseAsync([
       "node",
@@ -988,23 +1073,42 @@ describe("threadkit CLI", () => {
       "--profile",
       "minimal",
       "--apply",
+      "--force",
+      "--scope",
+      "project",
       "--root",
       root,
       "--format",
       "json"
     ]);
 
-    expect(harness.exitCode).toBe(2);
-    expect(JSON.parse(harness.stdout)).toMatchObject({
-      ok: false,
-      errors: [{ code: "unsupported-install-apply" }]
+    const output = JSON.parse(harness.stdout);
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(outputPath, "utf8")).toContain(
+      "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->"
+    );
+    expect(output).toMatchObject({
+      ok: true,
+      dryRun: false,
+      files: [{ action: "overwrite-foreign", existingIsForeign: true, backupPath: expect.any(String) }],
+      backups: [{ relPath: "skills/handoff/SKILL.md", backupPath: expect.any(String) }]
+    });
+    expect(await readFile(output.backups[0].backupPath, "utf8")).toBe("Human file\n");
+    expect(JSON.parse(await readFile(output.manifestPath, "utf8")).files[0]).toMatchObject({
+      action: "overwrite-foreign",
+      backupPath: output.backups[0].backupPath
     });
   });
 
-  it("rejects install force in the dry-run slice", async () => {
+  it("previews forced foreign overwrites without applying them when force is used without apply", async () => {
     const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
-    const harness = makeHarness();
+    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, "Human file\n");
+    const harness = makeHarness(cwd);
 
     await harness.program.parseAsync([
       "node",
@@ -1014,16 +1118,21 @@ describe("threadkit CLI", () => {
       "--profile",
       "minimal",
       "--force",
+      "--scope",
+      "project",
       "--root",
       root,
       "--format",
       "json"
     ]);
 
-    expect(harness.exitCode).toBe(2);
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(outputPath, "utf8")).toBe("Human file\n");
     expect(JSON.parse(harness.stdout)).toMatchObject({
-      ok: false,
-      errors: [{ code: "unsupported-install-force" }]
+      ok: true,
+      dryRun: true,
+      files: [{ action: "overwrite-foreign", existingIsForeign: true }]
     });
   });
 });

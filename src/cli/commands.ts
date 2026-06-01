@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   auditLibrary,
+  applyInstallPlan,
   buildPlan,
   getExportTarget,
   getRenderer,
@@ -352,14 +353,6 @@ export async function runInstall(
   const profileName = options.profile;
 
   try {
-    if (options.apply === true) {
-      throw new CliUsageError("unsupported-install-apply", "Install --apply is not supported in this dry-run slice.");
-    }
-
-    if (options.force === true) {
-      throw new CliUsageError("unsupported-install-force", "Install --force is not supported in this dry-run slice.");
-    }
-
     if (!profileName) {
       throw new CliUsageError("missing-profile", "Install requires --profile <name>.");
     }
@@ -402,11 +395,41 @@ export async function runInstall(
       scope: resolvedInstall.scope,
       baseDir: resolvedInstall.baseDir,
       render,
-      managedOnly: true
+      managedOnly: true,
+      forceForeign: options.force === true
     });
     const hasForeignFiles = plan.files.some((file) => file.action === "skip-foreign");
 
-    context.setExitCode(hasForeignFiles ? 1 : 0);
+    if (options.apply !== true || hasForeignFiles) {
+      context.setExitCode(hasForeignFiles ? 1 : 0);
+
+      if (format === "json") {
+        writeJson(context, {
+          ok: true,
+          root,
+          target: plan.target,
+          profile: plan.profile,
+          scope: plan.scope,
+          baseDir: plan.baseDir,
+          dryRun: true,
+          files: plan.files,
+          warnings: plan.warnings
+        });
+        return;
+      }
+
+      for (const file of plan.files) {
+        context.write(`${file.action}\t${file.path}\n`);
+      }
+      return;
+    }
+
+    const applied = await applyInstallPlan({ plan, render });
+    const backups = applied.files
+      .filter((file) => file.backupPath !== undefined)
+      .map((file) => ({ relPath: file.relPath, path: file.path, backupPath: file.backupPath }));
+
+    context.setExitCode(0);
 
     if (format === "json") {
       writeJson(context, {
@@ -416,15 +439,21 @@ export async function runInstall(
         profile: plan.profile,
         scope: plan.scope,
         baseDir: plan.baseDir,
-        dryRun: true,
-        files: plan.files,
+        dryRun: false,
+        manifestPath: applied.manifestPath,
+        files: applied.files,
+        backups,
         warnings: plan.warnings
       });
       return;
     }
 
-    for (const file of plan.files) {
+    for (const file of applied.files) {
       context.write(`${file.action}\t${file.path}\n`);
+    }
+    context.write(`manifest\t${applied.manifestPath}\n`);
+    for (const backup of backups) {
+      context.write(`backup\t${backup.backupPath}\n`);
     }
   } catch (error) {
     const normalized = normalizeError(error);
