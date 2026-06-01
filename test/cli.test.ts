@@ -28,6 +28,8 @@ targets:
     enabled: true
   opencode:
     enabled: true
+  gemini:
+    enabled: true
   markdown:
     enabled: true
 safety:
@@ -206,6 +208,7 @@ describe("threadkit CLI", () => {
           antigravity: { enabled: true },
           codex: { enabled: true },
           opencode: { enabled: true },
+          gemini: { enabled: true },
           markdown: { enabled: true }
         },
         safety: {
@@ -530,6 +533,65 @@ describe("threadkit CLI", () => {
         {
           path: join(out, "opencode", "command", "handoff.md"),
           relPath: "opencode/command/handoff.md",
+          marker: true,
+          bytes: expect.any(Number)
+        }
+      ],
+      warnings: []
+    });
+  });
+
+  it("exports gemini commands to the default dist directory", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync(["node", "threadkit", "export", "gemini", "--profile", "minimal", "--root", root]);
+
+    const output = await readFile(join(root, "dist", "gemini", "commands", "handoff.toml"), "utf8");
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(output).toContain('description = "Creates a handoff document."');
+    expect(output).toContain("# threadkit:generated target=gemini profile=minimal skill=handoff");
+    expect(output).toContain("# Handoff");
+  });
+
+  it("exports gemini commands to a custom output directory as JSON", async () => {
+    const root = await makeTempRoot();
+    const out = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "export",
+      "gemini",
+      "--profile",
+      "minimal",
+      "--root",
+      root,
+      "--out",
+      out,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(join(out, "gemini", "commands", "handoff.toml"), "utf8")).toContain(
+      "# threadkit:generated target=gemini profile=minimal skill=handoff"
+    );
+    expect(JSON.parse(harness.stdout)).toEqual({
+      ok: true,
+      root,
+      target: "gemini",
+      profile: "minimal",
+      outDir: out,
+      files: [
+        {
+          path: join(out, "gemini", "commands", "handoff.toml"),
+          relPath: "gemini/commands/handoff.toml",
           marker: true,
           bytes: expect.any(Number)
         }

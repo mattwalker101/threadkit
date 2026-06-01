@@ -48,6 +48,15 @@ export const exportTargets = {
       user: "~/.config/opencode/command",
       project: "./.opencode/command"
     }
+  },
+  gemini: {
+    name: "gemini",
+    format: "gemini-toml",
+    distSubdir: "gemini",
+    paths: {
+      user: "~/.gemini/commands",
+      project: "./.gemini/commands"
+    }
   }
 } as const satisfies Record<string, ExportTarget>;
 
