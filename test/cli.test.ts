@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -54,13 +54,13 @@ async function writeValidCustomLibrary(root: string): Promise<void> {
   await writeFile(join(root, "profiles", "minimal.yml"), validProfileYml);
 }
 
-function makeHarness() {
+function makeHarness(cwd = process.cwd()) {
   let stdout = "";
   let stderr = "";
   let exitCode: number | undefined;
 
   const program = createProgram({
-    cwd: process.cwd(),
+    cwd,
     write: (value) => {
       stdout += value;
     },
@@ -778,6 +778,252 @@ describe("threadkit CLI", () => {
         }
       ],
       warnings: []
+    });
+  });
+
+  it("dry-runs a claude install as JSON without writing files", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    const output = JSON.parse(harness.stdout);
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(output).toEqual({
+      ok: true,
+      root,
+      target: "claude",
+      profile: "minimal",
+      scope: "project",
+      baseDir: join(cwd, ".claude", "skills"),
+      dryRun: true,
+      files: [
+        {
+          path: join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md"),
+          relPath: "skills/handoff/SKILL.md",
+          action: "create",
+          marker: true,
+          existingIsForeign: false,
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/)
+        }
+      ],
+      warnings: []
+    });
+    await expect(stat(join(cwd, ".claude"))).rejects.toThrow();
+  });
+
+  it("classifies pre-existing managed install files", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await writeFile(
+      join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md"),
+      "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nOld\n"
+    );
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.exitCode).toBe(0);
+    expect(JSON.parse(harness.stdout).files[0]).toMatchObject({
+      relPath: "skills/handoff/SKILL.md",
+      action: "overwrite",
+      existingIsForeign: false
+    });
+  });
+
+  it("prints text install plans as action and path rows", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--root",
+      root
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(harness.stdout).toBe(
+      `create\t${join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md")}\n`
+    );
+  });
+
+
+  it("classifies pre-existing foreign install files, exits 1, and leaves them untouched", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    await writeValidCustomLibrary(root);
+    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, "Human file\n");
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.exitCode).toBe(1);
+    expect(JSON.parse(harness.stdout).files[0]).toMatchObject({
+      action: "skip-foreign",
+      existingIsForeign: true
+    });
+    expect(await readFile(outputPath, "utf8")).toBe("Human file\n");
+  });
+
+  it("reports markdown installs as unsupported", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "markdown",
+      "--profile",
+      "minimal",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.exitCode).toBe(2);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: false,
+      target: "markdown",
+      errors: [{ code: "unsupported-install-path" }]
+    });
+  });
+
+  it("reports unsupported install scopes", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "codex",
+      "--profile",
+      "minimal",
+      "--scope",
+      "user",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.exitCode).toBe(2);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: false,
+      target: "codex",
+      errors: [{ code: "unsupported-install-scope" }]
+    });
+  });
+
+  it("rejects install apply in the dry-run slice", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.exitCode).toBe(2);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: false,
+      errors: [{ code: "unsupported-install-apply" }]
+    });
+  });
+
+  it("rejects install force in the dry-run slice", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--force",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.exitCode).toBe(2);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: false,
+      errors: [{ code: "unsupported-install-force" }]
     });
   });
 });
