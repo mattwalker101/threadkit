@@ -1,9 +1,13 @@
 import { markdownRenderer } from "./renderMarkdown.js";
+import { agentsMdRenderer } from "./renderAgentsMd.js";
+import { openCodeCommandRenderer } from "./renderOpenCodeCommand.js";
 import { skillRenderer } from "./renderSkill.js";
 import type { Renderer } from "./renderTypes.js";
 
 export const renderers = {
   markdown: markdownRenderer,
+  "agents-md": agentsMdRenderer,
+  "opencode-command": openCodeCommandRenderer,
   skill: skillRenderer
 } as const satisfies Record<string, Renderer>;
 

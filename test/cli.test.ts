@@ -24,6 +24,10 @@ targets:
     enabled: true
   antigravity:
     enabled: true
+  codex:
+    enabled: true
+  opencode:
+    enabled: true
   markdown:
     enabled: true
 safety:
@@ -200,6 +204,8 @@ describe("threadkit CLI", () => {
         targets: {
           claude: { enabled: true },
           antigravity: { enabled: true },
+          codex: { enabled: true },
+          opencode: { enabled: true },
           markdown: { enabled: true }
         },
         safety: {
@@ -405,6 +411,125 @@ describe("threadkit CLI", () => {
         {
           path: join(out, "antigravity", "skills", "handoff", "SKILL.md"),
           relPath: "antigravity/skills/handoff/SKILL.md",
+          marker: true,
+          bytes: expect.any(Number)
+        }
+      ],
+      warnings: []
+    });
+  });
+
+  it("exports codex AGENTS.md to the default dist directory", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync(["node", "threadkit", "export", "codex", "--profile", "minimal", "--root", root]);
+
+    const output = await readFile(join(root, "dist", "codex", "AGENTS.md"), "utf8");
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(output).toContain("# minimal\n\n<!-- threadkit:generated target=codex profile=minimal -->");
+    expect(output).toContain("## Handoff");
+    expect(output).toContain("Summary: Creates a handoff document.");
+    expect(output).toContain("# Handoff");
+  });
+
+  it("exports codex AGENTS.md to a custom output directory as JSON", async () => {
+    const root = await makeTempRoot();
+    const out = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "export",
+      "codex",
+      "--profile",
+      "minimal",
+      "--root",
+      root,
+      "--out",
+      out,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(join(out, "codex", "AGENTS.md"), "utf8")).toContain(
+      "<!-- threadkit:generated target=codex profile=minimal -->"
+    );
+    expect(JSON.parse(harness.stdout)).toEqual({
+      ok: true,
+      root,
+      target: "codex",
+      profile: "minimal",
+      outDir: out,
+      files: [
+        {
+          path: join(out, "codex", "AGENTS.md"),
+          relPath: "codex/AGENTS.md",
+          marker: true,
+          bytes: expect.any(Number)
+        }
+      ],
+      warnings: []
+    });
+  });
+
+  it("exports opencode commands to the default dist directory", async () => {
+    const root = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync(["node", "threadkit", "export", "opencode", "--profile", "minimal", "--root", root]);
+
+    const output = await readFile(join(root, "dist", "opencode", "command", "handoff.md"), "utf8");
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(output).toContain("description: Creates a handoff document.");
+    expect(output).toContain("<!-- threadkit:generated target=opencode profile=minimal skill=handoff -->");
+    expect(output).toContain("# Handoff");
+  });
+
+  it("exports opencode commands to a custom output directory as JSON", async () => {
+    const root = await makeTempRoot();
+    const out = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness();
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "export",
+      "opencode",
+      "--profile",
+      "minimal",
+      "--root",
+      root,
+      "--out",
+      out,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(join(out, "opencode", "command", "handoff.md"), "utf8")).toContain(
+      "<!-- threadkit:generated target=opencode profile=minimal skill=handoff -->"
+    );
+    expect(JSON.parse(harness.stdout)).toEqual({
+      ok: true,
+      root,
+      target: "opencode",
+      profile: "minimal",
+      outDir: out,
+      files: [
+        {
+          path: join(out, "opencode", "command", "handoff.md"),
+          relPath: "opencode/command/handoff.md",
           marker: true,
           bytes: expect.any(Number)
         }
