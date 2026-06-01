@@ -1,4 +1,4 @@
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir as defaultHomedir } from "node:os";
 import { dirname, join, isAbsolute, resolve, sep } from "node:path";
@@ -51,6 +51,7 @@ export interface InstallManifest {
 }
 
 export type UninstallAction = "delete" | "skip-drifted" | "skip-foreign" | "missing";
+export type UninstallDirectoryAction = "prune" | "skip-nonempty";
 export type RollbackAction =
   | "restore"
   | "force-restore"
@@ -70,6 +71,12 @@ export interface PlannedUninstallFile {
   sha256: string;
 }
 
+export interface PlannedUninstallDirectory {
+  path: string;
+  relPath: string;
+  action: UninstallDirectoryAction;
+}
+
 export interface UninstallPlan {
   target: string;
   profile: string;
@@ -77,6 +84,7 @@ export interface UninstallPlan {
   baseDir: string;
   manifestPath: string;
   files: PlannedUninstallFile[];
+  directories: PlannedUninstallDirectory[];
   warnings: string[];
 }
 
@@ -260,6 +268,24 @@ export function manifestPathForBaseDir(baseDir: string): string {
 function stripTargetPrefix(target: string, relPath: string): string {
   const prefix = `${target}/`;
   return relPath.startsWith(prefix) ? relPath.slice(prefix.length) : relPath;
+}
+
+function relDirFromFileRelPath(relPath: string): string | undefined {
+  const directory = dirname(relPath);
+  return directory === "." ? undefined : directory;
+}
+
+function ancestorRelDirs(relPath: string): string[] {
+  const dirs: string[] = [];
+  let current = relDirFromFileRelPath(relPath);
+
+  while (current !== undefined && current !== ".") {
+    dirs.push(current);
+    const parent = dirname(current);
+    current = parent === current || parent === "." ? undefined : parent;
+  }
+
+  return dirs;
 }
 
 function hasManagedMarker(content: Buffer): boolean {
@@ -473,11 +499,76 @@ function assertManifestMatches(args: {
   }
 }
 
+async function planUninstallDirectories(args: {
+  baseDir: string;
+  files: PlannedUninstallFile[];
+  pruneEmptyDirs?: boolean;
+}): Promise<PlannedUninstallDirectory[]> {
+  if (args.pruneEmptyDirs !== true) {
+    return [];
+  }
+
+  const deleteRelPaths = new Set(args.files.filter((file) => file.action === "delete").map((file) => file.relPath));
+  const candidateRelDirs: string[] = [];
+  const seenRelDirs = new Set<string>();
+
+  for (const file of args.files) {
+    if (file.action !== "delete") {
+      continue;
+    }
+
+    for (const relDir of ancestorRelDirs(file.relPath)) {
+      if (relDir === ".threadkit" || relDir.startsWith(".threadkit/") || seenRelDirs.has(relDir)) {
+        continue;
+      }
+
+      seenRelDirs.add(relDir);
+      candidateRelDirs.push(relDir);
+    }
+  }
+
+  const directories: PlannedUninstallDirectory[] = [];
+  const pruneRelDirs = new Set<string>();
+
+  for (const relDir of candidateRelDirs) {
+    const directoryPath = resolveInsideBaseDir(args.baseDir, relDir);
+    let entries: Array<{ name: string; isDirectory: () => boolean }>;
+
+    try {
+      entries = await readdir(directoryPath, { withFileTypes: true });
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+      if (code !== "ENOENT") {
+        throw error;
+      }
+
+      continue;
+    }
+
+    const emptyAfterDeletes = entries.every((entry) => {
+      const entryRelPath = `${relDir}/${entry.name}`;
+      return deleteRelPaths.has(entryRelPath) || (entry.isDirectory() && pruneRelDirs.has(entryRelPath));
+    });
+
+    if (emptyAfterDeletes) {
+      pruneRelDirs.add(relDir);
+      directories.push({
+        path: directoryPath,
+        relPath: relDir,
+        action: "prune"
+      });
+    }
+  }
+
+  return directories;
+}
+
 export async function buildUninstallPlan(args: {
   manifest: InstallManifest;
   target: string;
   scope: InstallScope;
   baseDir: string;
+  pruneEmptyDirs?: boolean;
 }): Promise<UninstallPlan> {
   assertManifestMatches(args);
 
@@ -517,6 +608,12 @@ export async function buildUninstallPlan(args: {
     });
   }
 
+  const directories = await planUninstallDirectories({
+    baseDir: args.baseDir,
+    files,
+    pruneEmptyDirs: args.pruneEmptyDirs
+  });
+
   return {
     target: args.manifest.target,
     profile: args.manifest.profile,
@@ -524,6 +621,7 @@ export async function buildUninstallPlan(args: {
     baseDir: resolve(args.baseDir),
     manifestPath: manifestPathForBaseDir(args.baseDir),
     files,
+    directories,
     warnings: []
   };
 }

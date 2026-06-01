@@ -661,6 +661,49 @@ describe("uninstall planning", () => {
       code: "install-manifest-base-dir-mismatch"
     });
   });
+
+  it("plans empty parent directories for pruning after deletions", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const content = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, content);
+    const manifest = await loadInstallManifest({
+      baseDir: await seedInstalledManifest(baseDir, outputPath, content)
+    });
+
+    const plan = await buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir, pruneEmptyDirs: true });
+
+    expect(plan.directories).toEqual([
+      {
+        path: join(baseDir, "skills", "handoff"),
+        relPath: "skills/handoff",
+        action: "prune"
+      },
+      {
+        path: join(baseDir, "skills"),
+        relPath: "skills",
+        action: "prune"
+      }
+    ]);
+  });
+
+  it("does not plan directory pruning when sibling files remain", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const siblingPath = join(baseDir, "skills", "handoff", "notes.md");
+    const content = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, content);
+    await writeFile(siblingPath, "Human note\n");
+    const manifest = await loadInstallManifest({
+      baseDir: await seedInstalledManifest(baseDir, outputPath, content)
+    });
+
+    const plan = await buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir, pruneEmptyDirs: true });
+
+    expect(plan.directories).toEqual([]);
+  });
 });
 
 describe("uninstall application", () => {
@@ -685,6 +728,7 @@ describe("uninstall application", () => {
       baseDir,
       manifestPath: join(baseDir, ".threadkit", "install-manifest.json"),
       warnings: [],
+      directories: [],
       files: [
         { path: deletePath, relPath: "skills/handoff/SKILL.md", action: "delete", marker: true, sha256: sha256(content) },
         { path: driftedPath, relPath: "skills/changed/SKILL.md", action: "skip-drifted", marker: true, sha256: "x" },
@@ -725,6 +769,7 @@ describe("uninstall application", () => {
       baseDir,
       manifestPath: join(baseDir, ".threadkit", "install-manifest.json"),
       warnings: [],
+      directories: [],
       files: [
         {
           path: outsidePath,
