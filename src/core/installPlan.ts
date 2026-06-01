@@ -50,6 +50,14 @@ export interface InstallManifest {
 }
 
 export type UninstallAction = "delete" | "skip-drifted" | "skip-foreign" | "missing";
+export type RollbackAction =
+  | "restore"
+  | "skip-drifted"
+  | "skip-foreign"
+  | "missing"
+  | "no-backup"
+  | "missing-backup"
+  | "unsafe-backup-path";
 
 export interface PlannedUninstallFile {
   path: string;
@@ -69,6 +77,25 @@ export interface UninstallPlan {
   warnings: string[];
 }
 
+export interface PlannedRollbackFile {
+  path: string;
+  relPath: string;
+  action: RollbackAction;
+  marker: boolean;
+  sha256: string;
+  backupPath?: string;
+}
+
+export interface RollbackPlan {
+  target: string;
+  profile: string;
+  scope: InstallScope;
+  baseDir: string;
+  manifestPath: string;
+  files: PlannedRollbackFile[];
+  warnings: string[];
+}
+
 export interface ApplyInstallPlanResult {
   manifestPath: string;
   files: AppliedInstallFile[];
@@ -81,6 +108,15 @@ export interface AppliedUninstallFile extends PlannedUninstallFile {
 export interface ApplyUninstallPlanResult {
   manifestPath: string;
   files: AppliedUninstallFile[];
+}
+
+export interface AppliedRollbackFile extends PlannedRollbackFile {
+  restored: boolean;
+}
+
+export interface ApplyRollbackPlanResult {
+  manifestPath: string;
+  files: AppliedRollbackFile[];
 }
 
 export class InstallPlanUsageError extends Error {
@@ -177,6 +213,24 @@ function resolveInsideBaseDir(baseDir: string, relPath: string): string {
   }
 
   return outputPath;
+}
+
+function isInsideDirectory(baseDir: string, candidatePath: string): boolean {
+  const resolvedBaseDir = resolve(baseDir);
+  const resolvedCandidatePath = resolve(candidatePath);
+  const prefix = resolvedBaseDir.endsWith(sep) ? resolvedBaseDir : `${resolvedBaseDir}${sep}`;
+  return resolvedCandidatePath !== resolvedBaseDir && resolvedCandidatePath.startsWith(prefix);
+}
+
+function resolveBackupPath(baseDir: string, backupPath: string): string | undefined {
+  const backupRoot = join(baseDir, ".threadkit", "backups");
+  const resolvedBackupPath = isAbsolute(backupPath) ? resolve(backupPath) : resolve(baseDir, backupPath);
+
+  if (!isInsideDirectory(backupRoot, resolvedBackupPath)) {
+    return undefined;
+  }
+
+  return resolvedBackupPath;
 }
 
 async function contentForSpec(file: FileSpec): Promise<Buffer | string> {
@@ -492,6 +546,188 @@ export async function applyUninstallPlan(args: { plan: UninstallPlan }): Promise
       } else {
         await unlink(outputPath);
         applied.deleted = true;
+      }
+    }
+
+    files.push(applied);
+  }
+
+  return {
+    manifestPath: args.plan.manifestPath,
+    files
+  };
+}
+
+async function currentRollbackState(args: {
+  outputPath: string;
+  expectedSha256: string;
+  fallbackMarker: boolean;
+}): Promise<{ action: "restore" | "skip-drifted" | "skip-foreign" | "missing"; marker: boolean; sha256: string }> {
+  let existing: Buffer;
+
+  try {
+    existing = await readFile(args.outputPath);
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+    if (code !== "ENOENT") {
+      throw error;
+    }
+
+    return {
+      action: "missing",
+      marker: args.fallbackMarker,
+      sha256: args.expectedSha256
+    };
+  }
+
+  const marker = hasManagedMarker(existing);
+  const currentHash = sha256(existing);
+
+  if (!marker) {
+    return {
+      action: "skip-foreign",
+      marker,
+      sha256: currentHash
+    };
+  }
+
+  if (currentHash !== args.expectedSha256) {
+    return {
+      action: "skip-drifted",
+      marker,
+      sha256: currentHash
+    };
+  }
+
+  return {
+    action: "restore",
+    marker,
+    sha256: currentHash
+  };
+}
+
+export async function buildRollbackPlan(args: {
+  manifest: InstallManifest;
+  target: string;
+  scope: InstallScope;
+  baseDir: string;
+}): Promise<RollbackPlan> {
+  assertManifestMatches(args);
+
+  const files: PlannedRollbackFile[] = [];
+
+  for (const file of args.manifest.files) {
+    const outputPath = resolveInsideBaseDir(args.baseDir, file.relPath);
+    let action: RollbackAction = "restore";
+    let marker = file.marker;
+    let currentHash = file.sha256;
+    let backupPath: string | undefined;
+
+    if (file.backupPath === undefined) {
+      action = "no-backup";
+    } else {
+      backupPath = resolveBackupPath(args.baseDir, file.backupPath);
+
+      if (backupPath === undefined) {
+        action = "unsafe-backup-path";
+      } else {
+        try {
+          await readFile(backupPath);
+        } catch (error) {
+          const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+          if (code !== "ENOENT") {
+            throw error;
+          }
+
+          action = "missing-backup";
+        }
+      }
+    }
+
+    if (action === "restore") {
+      const current = await currentRollbackState({
+        outputPath,
+        expectedSha256: file.sha256,
+        fallbackMarker: file.marker
+      });
+      action = current.action;
+      marker = current.marker;
+      currentHash = current.sha256;
+    }
+
+    files.push({
+      path: outputPath,
+      relPath: file.relPath,
+      action,
+      marker,
+      sha256: currentHash,
+      ...(backupPath === undefined ? {} : { backupPath })
+    });
+  }
+
+  return {
+    target: args.manifest.target,
+    profile: args.manifest.profile,
+    scope: args.manifest.scope,
+    baseDir: resolve(args.baseDir),
+    manifestPath: manifestPathForBaseDir(args.baseDir),
+    files,
+    warnings: []
+  };
+}
+
+export async function applyRollbackPlan(args: { plan: RollbackPlan }): Promise<ApplyRollbackPlanResult> {
+  const files: AppliedRollbackFile[] = [];
+
+  for (const planned of args.plan.files) {
+    const outputPath = resolveInsideBaseDir(args.plan.baseDir, planned.relPath);
+    const applied: AppliedRollbackFile = { ...planned, path: outputPath, restored: false };
+
+    if (planned.action === "restore") {
+      if (planned.backupPath === undefined) {
+        applied.action = "no-backup";
+        files.push(applied);
+        continue;
+      }
+
+      const backupPath = resolveBackupPath(args.plan.baseDir, planned.backupPath);
+
+      if (backupPath === undefined) {
+        applied.action = "unsafe-backup-path";
+        delete applied.backupPath;
+        files.push(applied);
+        continue;
+      }
+
+      applied.backupPath = backupPath;
+
+      let backup: Buffer;
+      try {
+        backup = await readFile(backupPath);
+      } catch (error) {
+        const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+        if (code !== "ENOENT") {
+          throw error;
+        }
+
+        applied.action = "missing-backup";
+        files.push(applied);
+        continue;
+      }
+
+      const current = await currentRollbackState({
+        outputPath,
+        expectedSha256: planned.sha256,
+        fallbackMarker: planned.marker
+      });
+      applied.action = current.action;
+      applied.marker = current.marker;
+      applied.sha256 = current.sha256;
+
+      if (applied.action === "restore") {
+        await mkdir(dirname(outputPath), { recursive: true });
+        await writeFile(outputPath, backup);
+        applied.restored = true;
       }
     }
 

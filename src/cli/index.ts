@@ -6,6 +6,7 @@ import {
   runExport,
   runInstall,
   runList,
+  runRollback,
   runShow,
   runUninstall,
   runValidate,
@@ -89,6 +90,15 @@ export function createProgram(context: CommandContext = defaultContext): Command
     .option("--format <format>", "Output format: text or json.")
     .option("--apply", "Apply the uninstall plan.")
     .action((target, options) => runUninstall(target, options, context));
+
+  program
+    .command("rollback")
+    .description("Restore backed-up files from the latest threadkit install manifest.")
+    .argument("<target>", "Rollback target.")
+    .option("--scope <scope>", "Install scope: user or project.")
+    .option("--format <format>", "Output format: text or json.")
+    .option("--apply", "Apply the rollback plan.")
+    .action((target, options) => runRollback(target, options, context));
 
   return program;
 }
