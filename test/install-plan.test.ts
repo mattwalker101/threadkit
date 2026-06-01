@@ -441,7 +441,7 @@ describe("install application", () => {
 });
 
 describe("install manifest loading", () => {
-  it("loads a valid install manifest", async () => {
+  it("loads legacy install manifests without a schema version and returns exactly that manifest", async () => {
     const baseDir = await makeTempRoot();
     const manifest = {
       target: "claude",
@@ -464,6 +464,60 @@ describe("install manifest loading", () => {
     await writeFile(join(baseDir, ".threadkit", "install-manifest.json"), JSON.stringify(manifest));
 
     await expect(loadInstallManifest({ baseDir })).resolves.toEqual(manifest);
+  });
+
+  it("loads schema version 1 install manifests and returns exactly that manifest", async () => {
+    const baseDir = await makeTempRoot();
+    const manifest = {
+      schemaVersion: 1,
+      target: "claude",
+      profile: "minimal",
+      scope: "user",
+      baseDir,
+      installedAt: "2026-06-01T10-00-00-000Z",
+      files: [
+        {
+          path: join(baseDir, "skills", "handoff", "SKILL.md"),
+          relPath: "skills/handoff/SKILL.md",
+          action: "create",
+          sha256: "a7937b64b8caa58f03721bb6bacf5c78cb235febe0e70b1b84cd99541461a08e",
+          marker: true,
+          existingIsForeign: false
+        }
+      ]
+    };
+    await mkdir(join(baseDir, ".threadkit"), { recursive: true });
+    await writeFile(join(baseDir, ".threadkit", "install-manifest.json"), JSON.stringify(manifest));
+
+    await expect(loadInstallManifest({ baseDir })).resolves.toEqual(manifest);
+  });
+
+  it("rejects unsupported install manifest schema versions", async () => {
+    const baseDir = await makeTempRoot();
+    const manifest = {
+      schemaVersion: 2,
+      target: "claude",
+      profile: "minimal",
+      scope: "user",
+      baseDir,
+      installedAt: "2026-06-01T10-00-00-000Z",
+      files: [
+        {
+          path: join(baseDir, "skills", "handoff", "SKILL.md"),
+          relPath: "skills/handoff/SKILL.md",
+          action: "create",
+          sha256: "a7937b64b8caa58f03721bb6bacf5c78cb235febe0e70b1b84cd99541461a08e",
+          marker: true,
+          existingIsForeign: false
+        }
+      ]
+    };
+    await mkdir(join(baseDir, ".threadkit"), { recursive: true });
+    await writeFile(join(baseDir, ".threadkit", "install-manifest.json"), JSON.stringify(manifest));
+
+    await expect(loadInstallManifest({ baseDir })).rejects.toMatchObject({
+      code: "unsupported-install-manifest-version"
+    });
   });
 
   it("throws a usage error when the install manifest is missing", async () => {

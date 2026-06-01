@@ -41,6 +41,7 @@ export interface InstallManifestFile {
 }
 
 export interface InstallManifest {
+  schemaVersion?: 1;
   target: string;
   profile: string;
   scope: InstallScope;
@@ -359,6 +360,10 @@ function isInstallAction(value: unknown): value is InstallAction {
   );
 }
 
+function isInstallManifestSchemaVersion(value: unknown): value is InstallManifest["schemaVersion"] {
+  return value === undefined || value === 1;
+}
+
 function isInstallManifestFile(value: unknown): value is InstallManifestFile {
   if (!isRecord(value)) {
     return false;
@@ -381,6 +386,7 @@ function isInstallManifest(value: unknown): value is InstallManifest {
   }
 
   return (
+    isInstallManifestSchemaVersion(value.schemaVersion) &&
     typeof value.target === "string" &&
     typeof value.profile === "string" &&
     isInstallScope(value.scope) &&
@@ -416,6 +422,13 @@ export async function loadInstallManifest(args: { baseDir: string }): Promise<In
     throw new InstallPlanUsageError(
       "invalid-install-manifest",
       `Install manifest at '${manifestPath}' is not valid JSON.`
+    );
+  }
+
+  if (isRecord(parsed) && !isInstallManifestSchemaVersion(parsed.schemaVersion)) {
+    throw new InstallPlanUsageError(
+      "unsupported-install-manifest-version",
+      `Install manifest at '${manifestPath}' has unsupported schema version '${String(parsed.schemaVersion)}'.`
     );
   }
 
