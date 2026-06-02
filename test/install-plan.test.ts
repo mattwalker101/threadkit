@@ -6,13 +6,19 @@ import { describe, expect, it } from "vitest";
 import {
   applyUninstallPlan,
   applyInstallPlan,
+  applyBackupPrunePlan,
   buildPlan,
+  buildBackupPrunePlan,
   buildRollbackPlan,
   buildUninstallPlan,
   applyRollbackPlan,
+  backupGenerationToRollbackManifest,
+  backupIndexPathForBaseDir,
   InstallPlanUsageError,
+  loadBackupIndex,
   loadInstallManifest,
   resolveInstallBaseDir,
+  writeBackupIndex,
   type InstallScope
 } from "../src/core/index.js";
 import type { RenderResult } from "../src/core/index.js";
@@ -359,6 +365,89 @@ describe("install application", () => {
     expect(result.files[0]).toMatchObject({ action: "overwrite", backupPath });
   });
 
+  it("appends a backup-index generation when an install creates backups", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const oldContent = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nOld\n";
+    const newContent = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nNew\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, oldContent);
+    const renderResult = render([file(newContent)]);
+    const plan = await buildPlan({
+      target: "claude",
+      profile: "minimal",
+      scope: "user",
+      baseDir,
+      render: renderResult,
+      managedOnly: true
+    });
+
+    await applyInstallPlan({ plan, render: renderResult, timestamp: "2026-06-01T10-00-00-000Z" });
+
+    const index = await loadBackupIndex({ baseDir });
+    expect(index).toEqual({
+      schemaVersion: 1,
+      generations: [
+        {
+          id: "2026-06-01T10-00-00-000Z",
+          target: "claude",
+          profile: "minimal",
+          scope: "user",
+          baseDir,
+          installedAt: "2026-06-01T10-00-00-000Z",
+          backupDir: join(baseDir, ".threadkit", "backups", "2026-06-01T10-00-00-000Z"),
+          files: [
+            {
+              path: outputPath,
+              relPath: "skills/handoff/SKILL.md",
+              action: "overwrite",
+              sha256: sha256(newContent),
+              marker: true,
+              existingIsForeign: false,
+              backupPath: join(
+                baseDir,
+                ".threadkit",
+                "backups",
+                "2026-06-01T10-00-00-000Z",
+                "skills",
+                "handoff",
+                "SKILL.md"
+              )
+            }
+          ]
+        }
+      ]
+    });
+  });
+
+  it("does not create a backup-index generation for create-only or unchanged installs", async () => {
+    const baseDir = await makeTempRoot();
+    const generated = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    const renderResult = render([file(generated)]);
+    const createPlan = await buildPlan({
+      target: "claude",
+      profile: "minimal",
+      scope: "user",
+      baseDir,
+      render: renderResult,
+      managedOnly: true
+    });
+    await applyInstallPlan({ plan: createPlan, render: renderResult, timestamp: "2026-06-01T10-00-00-000Z" });
+    const unchangedPlan = await buildPlan({
+      target: "claude",
+      profile: "minimal",
+      scope: "user",
+      baseDir,
+      render: renderResult,
+      managedOnly: true
+    });
+
+    await applyInstallPlan({ plan: unchangedPlan, render: renderResult, timestamp: "2026-06-01T11-00-00-000Z" });
+
+    expect(await loadBackupIndex({ baseDir })).toEqual({ schemaVersion: 1, generations: [] });
+    await expect(stat(backupIndexPathForBaseDir(baseDir))).rejects.toThrow();
+  });
+
   it("leaves unchanged files untouched", async () => {
     const baseDir = await makeTempRoot();
     const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
@@ -538,6 +627,64 @@ describe("install manifest loading", () => {
     await expect(loadInstallManifest({ baseDir })).rejects.toMatchObject({
       code: "invalid-install-manifest"
     });
+  });
+});
+
+describe("backup index loading", () => {
+  it("loads a missing backup index as empty history", async () => {
+    const baseDir = await makeTempRoot();
+
+    await expect(loadBackupIndex({ baseDir })).resolves.toEqual({ schemaVersion: 1, generations: [] });
+  });
+
+  it("rejects unsupported backup index schema versions", async () => {
+    const baseDir = await makeTempRoot();
+    await mkdir(join(baseDir, ".threadkit"), { recursive: true });
+    await writeFile(
+      backupIndexPathForBaseDir(baseDir),
+      JSON.stringify({ schemaVersion: 2, generations: [] })
+    );
+
+    await expect(loadBackupIndex({ baseDir })).rejects.toMatchObject({
+      code: "unsupported-backup-index-version"
+    });
+  });
+
+  it("loads generations newest first", async () => {
+    const baseDir = await makeTempRoot();
+    await writeBackupIndex({
+      baseDir,
+      index: {
+        schemaVersion: 1,
+        generations: [
+          {
+            id: "older",
+            target: "claude",
+            profile: "minimal",
+            scope: "user",
+            baseDir,
+            installedAt: "2026-06-01T10-00-00-000Z",
+            backupDir: join(baseDir, ".threadkit", "backups", "older"),
+            files: []
+          },
+          {
+            id: "newer",
+            target: "claude",
+            profile: "minimal",
+            scope: "user",
+            baseDir,
+            installedAt: "2026-06-01T11-00-00-000Z",
+            backupDir: join(baseDir, ".threadkit", "backups", "newer"),
+            files: []
+          }
+        ]
+      }
+    });
+
+    expect((await loadBackupIndex({ baseDir })).generations.map((generation) => generation.id)).toEqual([
+      "newer",
+      "older"
+    ]);
   });
 });
 
@@ -1099,6 +1246,62 @@ describe("rollback planning", () => {
       { relPath: "skills/unsafe/SKILL.md", action: "unsafe-backup-path" }
     ]);
   });
+
+  it("builds a rollback plan from a named backup generation", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const backupPath = join(baseDir, ".threadkit", "backups", "gen-1", "skills", "handoff", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    await mkdir(dirname(outputPath), { recursive: true });
+    await mkdir(dirname(backupPath), { recursive: true });
+    await writeFile(outputPath, current);
+    await writeFile(backupPath, "Original\n");
+    await writeBackupIndex({
+      baseDir,
+      index: {
+        schemaVersion: 1,
+        generations: [
+          {
+            id: "gen-1",
+            target: "claude",
+            profile: "minimal",
+            scope: "user",
+            baseDir,
+            installedAt: "2026-06-01T10-00-00-000Z",
+            backupDir: join(baseDir, ".threadkit", "backups", "gen-1"),
+            files: [
+              {
+                path: outputPath,
+                relPath: "skills/handoff/SKILL.md",
+                action: "overwrite",
+                sha256: sha256(current),
+                marker: true,
+                existingIsForeign: false,
+                backupPath
+              }
+            ]
+          }
+        ]
+      }
+    });
+    const generation = (await loadBackupIndex({ baseDir })).generations[0]!;
+
+    const plan = await buildRollbackPlan({
+      manifest: backupGenerationToRollbackManifest(generation),
+      target: "claude",
+      scope: "user",
+      baseDir
+    });
+
+    expect(plan.manifestPath).toBe(backupIndexPathForBaseDir(baseDir));
+    expect(plan.files).toMatchObject([
+      {
+        relPath: "skills/handoff/SKILL.md",
+        action: "restore",
+        backupPath
+      }
+    ]);
+  });
 });
 
 describe("rollback application", () => {
@@ -1371,6 +1574,91 @@ describe("rollback application", () => {
     expect(result.files).toMatchObject([
       { relPath: "skills/drifted/SKILL.md", action: "skip-drifted", restored: false },
       { relPath: "skills/foreign/SKILL.md", action: "skip-foreign", restored: false }
+    ]);
+  });
+});
+
+describe("backup pruning", () => {
+  it("plans pruning for matching generations older than the keep count", async () => {
+    const baseDir = await makeTempRoot();
+    const index = {
+      schemaVersion: 1 as const,
+      generations: Array.from({ length: 4 }, (_, index) => ({
+        id: `gen-${index + 1}`,
+        target: "claude",
+        profile: "minimal",
+        scope: "user" as const,
+        baseDir,
+        installedAt: `2026-06-01T1${index}-00-00-000Z`,
+        backupDir: join(baseDir, ".threadkit", "backups", `gen-${index + 1}`),
+        files: []
+      }))
+    };
+
+    const plan = buildBackupPrunePlan({ index, baseDir, target: "claude", scope: "user", keep: 2 });
+
+    expect(plan.generations.map((generation) => generation.id)).toEqual(["gen-2", "gen-1"]);
+    expect(plan.retained.map((generation) => generation.id)).toEqual(["gen-4", "gen-3"]);
+    expect(plan.dryRun).toBe(true);
+  });
+
+  it("applies pruning only for safe indexed backup directories and updates the index", async () => {
+    const baseDir = await makeTempRoot();
+    const oldBackupDir = join(baseDir, ".threadkit", "backups", "old");
+    const unsafeBackupDir = join(baseDir, ".threadkit", "not-backups", "unsafe");
+    await mkdir(oldBackupDir, { recursive: true });
+    await writeFile(join(oldBackupDir, "old.md"), "old\n");
+    await mkdir(unsafeBackupDir, { recursive: true });
+    await writeFile(join(unsafeBackupDir, "unsafe.md"), "unsafe\n");
+    const index = {
+      schemaVersion: 1 as const,
+      generations: [
+        {
+          id: "new",
+          target: "claude",
+          profile: "minimal",
+          scope: "user" as const,
+          baseDir,
+          installedAt: "2026-06-01T12-00-00-000Z",
+          backupDir: join(baseDir, ".threadkit", "backups", "new"),
+          files: []
+        },
+        {
+          id: "old",
+          target: "claude",
+          profile: "minimal",
+          scope: "user" as const,
+          baseDir,
+          installedAt: "2026-06-01T11-00-00-000Z",
+          backupDir: oldBackupDir,
+          files: []
+        },
+        {
+          id: "unsafe",
+          target: "claude",
+          profile: "minimal",
+          scope: "user" as const,
+          baseDir,
+          installedAt: "2026-06-01T10-00-00-000Z",
+          backupDir: unsafeBackupDir,
+          files: []
+        }
+      ]
+    };
+    await writeBackupIndex({ baseDir, index });
+    const plan = buildBackupPrunePlan({ index, baseDir, target: "claude", scope: "user", keep: 1 });
+
+    const result = await applyBackupPrunePlan({ plan });
+
+    await expect(stat(oldBackupDir)).rejects.toThrow();
+    expect(await readFile(join(unsafeBackupDir, "unsafe.md"), "utf8")).toBe("unsafe\n");
+    expect(result.generations).toMatchObject([
+      { id: "old", action: "delete", deleted: true },
+      { id: "unsafe", action: "unsafe-backup-dir", deleted: false }
+    ]);
+    expect((await loadBackupIndex({ baseDir })).generations.map((generation) => generation.id)).toEqual([
+      "new",
+      "unsafe"
     ]);
   });
 });

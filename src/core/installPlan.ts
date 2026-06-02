@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rmdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, rmdir, unlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir as defaultHomedir } from "node:os";
 import { dirname, join, isAbsolute, resolve, sep } from "node:path";
@@ -48,6 +48,27 @@ export interface InstallManifest {
   baseDir: string;
   installedAt: string;
   files: InstallManifestFile[];
+  manifestPath?: string;
+}
+
+export interface BackupGenerationFile extends InstallManifestFile {
+  backupPath: string;
+}
+
+export interface BackupGeneration {
+  id: string;
+  target: string;
+  profile: string;
+  scope: InstallScope;
+  baseDir: string;
+  installedAt: string;
+  backupDir: string;
+  files: BackupGenerationFile[];
+}
+
+export interface BackupIndex {
+  schemaVersion: 1;
+  generations: BackupGeneration[];
 }
 
 export type UninstallAction = "delete" | "skip-drifted" | "skip-foreign" | "missing";
@@ -134,6 +155,34 @@ export interface AppliedRollbackFile extends PlannedRollbackFile {
 export interface ApplyRollbackPlanResult {
   manifestPath: string;
   files: AppliedRollbackFile[];
+}
+
+export type BackupPruneAction = "delete" | "unsafe-backup-dir";
+
+export interface PlannedBackupPruneGeneration extends BackupGeneration {
+  action: BackupPruneAction;
+}
+
+export interface BackupPrunePlan {
+  index: BackupIndex;
+  baseDir: string;
+  target: string;
+  scope: InstallScope;
+  keep: number;
+  dryRun: true;
+  generations: PlannedBackupPruneGeneration[];
+  retained: BackupGeneration[];
+  warnings: string[];
+}
+
+export interface AppliedBackupPruneGeneration extends PlannedBackupPruneGeneration {
+  deleted: boolean;
+}
+
+export interface ApplyBackupPrunePlanResult {
+  indexPath: string;
+  generations: AppliedBackupPruneGeneration[];
+  retained: BackupGeneration[];
 }
 
 export class InstallPlanUsageError extends Error {
@@ -268,6 +317,10 @@ function sha256(content: Buffer | string): string {
 
 export function manifestPathForBaseDir(baseDir: string): string {
   return join(baseDir, ".threadkit", "install-manifest.json");
+}
+
+export function backupIndexPathForBaseDir(baseDir: string): string {
+  return join(baseDir, ".threadkit", "backup-index.json");
 }
 
 function stripTargetPrefix(target: string, relPath: string): string {
@@ -414,6 +467,40 @@ function isInstallManifestFile(value: unknown): value is InstallManifestFile {
   );
 }
 
+function isBackupGenerationFile(value: unknown): value is BackupGenerationFile {
+  return isInstallManifestFile(value) && typeof value.backupPath === "string";
+}
+
+function isBackupGeneration(value: unknown): value is BackupGeneration {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.target === "string" &&
+    typeof value.profile === "string" &&
+    isInstallScope(value.scope) &&
+    typeof value.baseDir === "string" &&
+    typeof value.installedAt === "string" &&
+    typeof value.backupDir === "string" &&
+    Array.isArray(value.files) &&
+    value.files.every(isBackupGenerationFile)
+  );
+}
+
+function isBackupIndex(value: unknown): value is BackupIndex {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return value.schemaVersion === 1 && Array.isArray(value.generations) && value.generations.every(isBackupGeneration);
+}
+
+function newestGenerationsFirst(generations: BackupGeneration[]): BackupGeneration[] {
+  return [...generations].sort((left, right) => right.installedAt.localeCompare(left.installedAt));
+}
+
 function isInstallManifest(value: unknown): value is InstallManifest {
   if (!isRecord(value)) {
     return false;
@@ -474,6 +561,69 @@ export async function loadInstallManifest(args: { baseDir: string }): Promise<In
   }
 
   return parsed;
+}
+
+export async function loadBackupIndex(args: { baseDir: string }): Promise<BackupIndex> {
+  const indexPath = backupIndexPathForBaseDir(args.baseDir);
+  let raw: string;
+
+  try {
+    raw = await readFile(indexPath, "utf8");
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+    if (code === "ENOENT") {
+      return { schemaVersion: 1, generations: [] };
+    }
+
+    throw error;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new InstallPlanUsageError("invalid-backup-index", `Backup index at '${indexPath}' is not valid JSON.`);
+  }
+
+  if (isRecord(parsed) && parsed.schemaVersion !== 1) {
+    throw new InstallPlanUsageError(
+      "unsupported-backup-index-version",
+      `Backup index at '${indexPath}' has unsupported schema version '${String(parsed.schemaVersion)}'.`
+    );
+  }
+
+  if (!isBackupIndex(parsed)) {
+    throw new InstallPlanUsageError("invalid-backup-index", `Backup index at '${indexPath}' has an invalid shape.`);
+  }
+
+  return {
+    schemaVersion: 1,
+    generations: newestGenerationsFirst(parsed.generations)
+  };
+}
+
+export async function writeBackupIndex(args: { baseDir: string; index: BackupIndex }): Promise<string> {
+  const indexPath = backupIndexPathForBaseDir(args.baseDir);
+  const index: BackupIndex = {
+    schemaVersion: 1,
+    generations: newestGenerationsFirst(args.index.generations)
+  };
+  await mkdir(dirname(indexPath), { recursive: true });
+  await writeFile(indexPath, `${JSON.stringify(index, null, 2)}\n`);
+  return indexPath;
+}
+
+export function backupGenerationToRollbackManifest(generation: BackupGeneration): InstallManifest {
+  return {
+    schemaVersion: 1,
+    target: generation.target,
+    profile: generation.profile,
+    scope: generation.scope,
+    baseDir: generation.baseDir,
+    installedAt: generation.installedAt,
+    manifestPath: backupIndexPathForBaseDir(generation.baseDir),
+    files: generation.files.map((file) => ({ ...file }))
+  };
 }
 
 function assertManifestMatches(args: {
@@ -818,9 +968,84 @@ export async function buildRollbackPlan(args: {
     profile: args.manifest.profile,
     scope: args.manifest.scope,
     baseDir: resolve(args.baseDir),
-    manifestPath: manifestPathForBaseDir(args.baseDir),
+    manifestPath: args.manifest.manifestPath ?? manifestPathForBaseDir(args.baseDir),
     files,
     warnings: []
+  };
+}
+
+function isSafeBackupDir(baseDir: string, backupDir: string): boolean {
+  return isInsideDirectory(join(baseDir, ".threadkit", "backups"), backupDir);
+}
+
+export function buildBackupPrunePlan(args: {
+  index: BackupIndex;
+  baseDir: string;
+  target: string;
+  scope: InstallScope;
+  keep?: number;
+}): BackupPrunePlan {
+  const keep = args.keep ?? 10;
+  const matching = newestGenerationsFirst(
+    args.index.generations.filter(
+      (generation) =>
+        generation.target === args.target &&
+        generation.scope === args.scope &&
+        resolve(generation.baseDir) === resolve(args.baseDir)
+    )
+  );
+  const retained = matching.slice(0, keep);
+  const retainedIds = new Set(retained.map((generation) => generation.id));
+  const generations = matching
+    .filter((generation) => !retainedIds.has(generation.id))
+    .map((generation): PlannedBackupPruneGeneration => ({
+      ...generation,
+      action: isSafeBackupDir(args.baseDir, generation.backupDir) ? "delete" : "unsafe-backup-dir"
+    }));
+
+  return {
+    index: args.index,
+    baseDir: resolve(args.baseDir),
+    target: args.target,
+    scope: args.scope,
+    keep,
+    dryRun: true,
+    generations,
+    retained,
+    warnings: []
+  };
+}
+
+export async function applyBackupPrunePlan(args: {
+  plan: BackupPrunePlan;
+}): Promise<ApplyBackupPrunePlanResult> {
+  const generations: AppliedBackupPruneGeneration[] = [];
+  const deletedIds = new Set<string>();
+
+  for (const planned of args.plan.generations) {
+    const applied: AppliedBackupPruneGeneration = { ...planned, deleted: false };
+
+    if (planned.action === "delete" && isSafeBackupDir(args.plan.baseDir, planned.backupDir)) {
+      await rm(planned.backupDir, { recursive: true, force: true });
+      applied.deleted = true;
+      deletedIds.add(planned.id);
+    } else if (planned.action === "delete") {
+      applied.action = "unsafe-backup-dir";
+    }
+
+    generations.push(applied);
+  }
+
+  const index: BackupIndex = {
+    schemaVersion: 1,
+    generations: args.plan.index.generations.filter((generation) => !deletedIds.has(generation.id))
+  };
+  const indexPath = await writeBackupIndex({ baseDir: args.plan.baseDir, index });
+
+  return {
+    indexPath,
+    generations,
+    retained: args.plan.retained
   };
 }
 
@@ -964,6 +1189,31 @@ export async function applyInstallPlan(args: {
 
   await mkdir(dirname(manifestPath), { recursive: true });
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const backedUpFiles = manifest.files.filter((file): file is BackupGenerationFile => file.backupPath !== undefined);
+  if (backedUpFiles.length > 0) {
+    const existingIndex = await loadBackupIndex({ baseDir: args.plan.baseDir });
+    const backupDir = join(args.plan.baseDir, ".threadkit", "backups", timestamp);
+    await writeBackupIndex({
+      baseDir: args.plan.baseDir,
+      index: {
+        schemaVersion: 1,
+        generations: [
+          ...existingIndex.generations,
+          {
+            id: timestamp,
+            target: args.plan.target,
+            profile: args.plan.profile,
+            scope: args.plan.scope,
+            baseDir: args.plan.baseDir,
+            installedAt: timestamp,
+            backupDir,
+            files: backedUpFiles
+          }
+        ]
+      }
+    });
+  }
 
   return {
     manifestPath,

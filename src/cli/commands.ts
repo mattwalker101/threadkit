@@ -3,14 +3,18 @@ import { join, resolve } from "node:path";
 import {
   auditLibrary,
   applyInstallPlan,
+  applyBackupPrunePlan,
   applyRollbackPlan,
   applyUninstallPlan,
+  backupGenerationToRollbackManifest,
+  buildBackupPrunePlan,
   buildPlan,
   buildRollbackPlan,
   buildUninstallPlan,
   getExportTarget,
   getRenderer,
   InstallPlanUsageError,
+  loadBackupIndex,
   loadInstallManifest,
   loadLibrary,
   resolveInstallBaseDir,
@@ -57,6 +61,19 @@ export interface RollbackOptions {
   format?: string;
   apply?: boolean;
   force?: boolean;
+  generation?: string;
+}
+
+export interface BackupListOptions {
+  scope?: string;
+  format?: string;
+}
+
+export interface BackupPruneOptions {
+  scope?: string;
+  format?: string;
+  keep?: string;
+  apply?: boolean;
 }
 
 export interface AuditOptions extends RootOptions {
@@ -606,7 +623,30 @@ export async function runRollback(
       cwd: context.cwd,
       env: process.env
     });
-    const manifest = await loadInstallManifest({ baseDir: resolvedInstall.baseDir });
+    let manifest;
+
+    if (options.generation === undefined) {
+      manifest = await loadInstallManifest({ baseDir: resolvedInstall.baseDir });
+    } else {
+      const index = await loadBackupIndex({ baseDir: resolvedInstall.baseDir });
+      const generation = index.generations.find(
+        (candidate) =>
+          candidate.id === options.generation &&
+          candidate.target === resolvedInstall.target &&
+          candidate.scope === resolvedInstall.scope &&
+          resolve(candidate.baseDir) === resolve(resolvedInstall.baseDir)
+      );
+
+      if (!generation) {
+        throw new InstallPlanUsageError(
+          "missing-backup-generation",
+          `Backup generation '${options.generation}' was not found.`
+        );
+      }
+
+      manifest = backupGenerationToRollbackManifest(generation);
+    }
+
     const plan = await buildRollbackPlan({
       manifest,
       target: resolvedInstall.target,
@@ -627,6 +667,7 @@ export async function runRollback(
           baseDir: plan.baseDir,
           dryRun: true,
           force: options.force === true,
+          ...(options.generation === undefined ? {} : { generation: options.generation }),
           manifestPath: plan.manifestPath,
           files: plan.files,
           warnings: plan.warnings
@@ -654,6 +695,7 @@ export async function runRollback(
         baseDir: plan.baseDir,
         dryRun: false,
         force: options.force === true,
+        ...(options.generation === undefined ? {} : { generation: options.generation }),
         manifestPath: applied.manifestPath,
         files: applied.files,
         restored,
@@ -681,5 +723,164 @@ export async function runRollback(
     }
 
     context.writeError(`Rollback failed: ${normalized.message}\n`);
+  }
+}
+
+export async function runBackupList(
+  targetName: string,
+  options: BackupListOptions,
+  context: CommandContext
+): Promise<void> {
+  const format = getFormat(options.format);
+
+  try {
+    const resolvedInstall = resolveInstallBaseDir({
+      targetName,
+      scope: options.scope,
+      cwd: context.cwd,
+      env: process.env
+    });
+    const index = await loadBackupIndex({ baseDir: resolvedInstall.baseDir });
+    const generations = index.generations.filter(
+      (generation) =>
+        generation.target === resolvedInstall.target &&
+        generation.scope === resolvedInstall.scope &&
+        resolve(generation.baseDir) === resolve(resolvedInstall.baseDir)
+    );
+
+    context.setExitCode(0);
+
+    if (format === "json") {
+      writeJson(context, {
+        ok: true,
+        target: resolvedInstall.target,
+        scope: resolvedInstall.scope,
+        baseDir: resolvedInstall.baseDir,
+        generations
+      });
+      return;
+    }
+
+    for (const generation of generations) {
+      context.write(`${generation.id}\t${generation.installedAt}\t${generation.profile}\t${generation.backupDir}\n`);
+    }
+  } catch (error) {
+    const normalized = normalizeError(error);
+    context.setExitCode(isUsageError(error) ? 2 : 1);
+
+    if (format === "json") {
+      writeJson(context, {
+        ok: false,
+        target: targetName,
+        errors: [normalized],
+        warnings: []
+      });
+      return;
+    }
+
+    context.writeError(`Backups list failed: ${normalized.message}\n`);
+  }
+}
+
+function parseKeep(value: string | undefined): number {
+  if (value === undefined) {
+    return 10;
+  }
+
+  const keep = Number(value);
+  if (!Number.isInteger(keep) || keep < 0) {
+    throw new CliUsageError("invalid-keep", "--keep must be a non-negative integer.");
+  }
+
+  return keep;
+}
+
+export async function runBackupPrune(
+  targetName: string,
+  options: BackupPruneOptions,
+  context: CommandContext
+): Promise<void> {
+  const format = getFormat(options.format);
+
+  try {
+    const keep = parseKeep(options.keep);
+    const resolvedInstall = resolveInstallBaseDir({
+      targetName,
+      scope: options.scope,
+      cwd: context.cwd,
+      env: process.env
+    });
+    const index = await loadBackupIndex({ baseDir: resolvedInstall.baseDir });
+    const plan = buildBackupPrunePlan({
+      index,
+      baseDir: resolvedInstall.baseDir,
+      target: resolvedInstall.target,
+      scope: resolvedInstall.scope,
+      keep
+    });
+
+    if (options.apply !== true) {
+      context.setExitCode(0);
+
+      if (format === "json") {
+        writeJson(context, {
+          ok: true,
+          target: resolvedInstall.target,
+          scope: resolvedInstall.scope,
+          baseDir: resolvedInstall.baseDir,
+          dryRun: true,
+          keep,
+          generations: plan.generations,
+          retained: plan.retained,
+          warnings: plan.warnings
+        });
+        return;
+      }
+
+      for (const generation of plan.generations) {
+        context.write(`${generation.action}\t${generation.id}\t${generation.backupDir}\n`);
+      }
+      return;
+    }
+
+    const applied = await applyBackupPrunePlan({ plan });
+
+    context.setExitCode(0);
+
+    if (format === "json") {
+      writeJson(context, {
+        ok: true,
+        target: resolvedInstall.target,
+        scope: resolvedInstall.scope,
+        baseDir: resolvedInstall.baseDir,
+        dryRun: false,
+        keep,
+        indexPath: applied.indexPath,
+        generations: applied.generations,
+        retained: applied.retained,
+        warnings: plan.warnings
+      });
+      return;
+    }
+
+    for (const generation of applied.generations) {
+      context.write(`${generation.action}\t${generation.id}\t${generation.backupDir}\n`);
+    }
+    context.write(`index\t${applied.indexPath}\n`);
+  } catch (error) {
+    const normalized = normalizeError(error);
+    context.setExitCode(isUsageError(error) ? 2 : 1);
+
+    if (format === "json") {
+      writeJson(context, {
+        ok: false,
+        target: targetName,
+        errors: [normalized],
+        warnings: []
+      });
+      return;
+    }
+
+    context.writeError(`Backups prune failed: ${normalized.message}\n`);
   }
 }
