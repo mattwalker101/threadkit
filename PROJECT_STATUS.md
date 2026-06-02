@@ -17,6 +17,12 @@ The safety invariant remains: ThreadKit must not mutate unmarked foreign files.
 Uninstall also skips drifted generated files whose current hash no longer
 matches the manifest.
 
+## Known gaps (intentionally deferred)
+
+Orphan backup directories — directories written to `<baseDir>/.threadkit/backups/`
+during a failed install before the index is updated — are not detected or cleaned up.
+They must be removed manually.
+
 ## Local Environment
 
 Use `source ~/.nvm/nvm.sh && nvm use` before running `corepack pnpm ...`
