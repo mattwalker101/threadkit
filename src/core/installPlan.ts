@@ -1,4 +1,4 @@
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rmdir, unlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir as defaultHomedir } from "node:os";
 import { dirname, join, isAbsolute, resolve, sep } from "node:path";
@@ -41,6 +41,7 @@ export interface InstallManifestFile {
 }
 
 export interface InstallManifest {
+  schemaVersion?: 1;
   target: string;
   profile: string;
   scope: InstallScope;
@@ -50,8 +51,11 @@ export interface InstallManifest {
 }
 
 export type UninstallAction = "delete" | "skip-drifted" | "skip-foreign" | "missing";
+export type UninstallDirectoryAction = "prune" | "skip-nonempty";
 export type RollbackAction =
   | "restore"
+  | "force-restore"
+  | "skip-current"
   | "skip-drifted"
   | "skip-foreign"
   | "missing"
@@ -67,6 +71,12 @@ export interface PlannedUninstallFile {
   sha256: string;
 }
 
+export interface PlannedUninstallDirectory {
+  path: string;
+  relPath: string;
+  action: UninstallDirectoryAction;
+}
+
 export interface UninstallPlan {
   target: string;
   profile: string;
@@ -74,6 +84,7 @@ export interface UninstallPlan {
   baseDir: string;
   manifestPath: string;
   files: PlannedUninstallFile[];
+  directories: PlannedUninstallDirectory[];
   warnings: string[];
 }
 
@@ -83,6 +94,7 @@ export interface PlannedRollbackFile {
   action: RollbackAction;
   marker: boolean;
   sha256: string;
+  installedSha256?: string;
   backupPath?: string;
 }
 
@@ -105,9 +117,14 @@ export interface AppliedUninstallFile extends PlannedUninstallFile {
   deleted: boolean;
 }
 
+export interface AppliedUninstallDirectory extends PlannedUninstallDirectory {
+  pruned: boolean;
+}
+
 export interface ApplyUninstallPlanResult {
   manifestPath: string;
   files: AppliedUninstallFile[];
+  directories: AppliedUninstallDirectory[];
 }
 
 export interface AppliedRollbackFile extends PlannedRollbackFile {
@@ -258,6 +275,24 @@ function stripTargetPrefix(target: string, relPath: string): string {
   return relPath.startsWith(prefix) ? relPath.slice(prefix.length) : relPath;
 }
 
+function relDirFromFileRelPath(relPath: string): string | undefined {
+  const directory = dirname(relPath);
+  return directory === "." ? undefined : directory;
+}
+
+function ancestorRelDirs(relPath: string): string[] {
+  const dirs: string[] = [];
+  let current = relDirFromFileRelPath(relPath);
+
+  while (current !== undefined && current !== ".") {
+    dirs.push(current);
+    const parent = dirname(current);
+    current = parent === current || parent === "." ? undefined : parent;
+  }
+
+  return dirs;
+}
+
 function hasManagedMarker(content: Buffer): boolean {
   const text = content.toString("utf8");
   const firstLines = text.split(/\r?\n/, 15);
@@ -359,6 +394,10 @@ function isInstallAction(value: unknown): value is InstallAction {
   );
 }
 
+function isInstallManifestSchemaVersion(value: unknown): value is InstallManifest["schemaVersion"] {
+  return value === undefined || value === 1;
+}
+
 function isInstallManifestFile(value: unknown): value is InstallManifestFile {
   if (!isRecord(value)) {
     return false;
@@ -381,6 +420,7 @@ function isInstallManifest(value: unknown): value is InstallManifest {
   }
 
   return (
+    isInstallManifestSchemaVersion(value.schemaVersion) &&
     typeof value.target === "string" &&
     typeof value.profile === "string" &&
     isInstallScope(value.scope) &&
@@ -416,6 +456,13 @@ export async function loadInstallManifest(args: { baseDir: string }): Promise<In
     throw new InstallPlanUsageError(
       "invalid-install-manifest",
       `Install manifest at '${manifestPath}' is not valid JSON.`
+    );
+  }
+
+  if (isRecord(parsed) && !isInstallManifestSchemaVersion(parsed.schemaVersion)) {
+    throw new InstallPlanUsageError(
+      "unsupported-install-manifest-version",
+      `Install manifest at '${manifestPath}' has unsupported schema version '${String(parsed.schemaVersion)}'.`
     );
   }
 
@@ -457,11 +504,76 @@ function assertManifestMatches(args: {
   }
 }
 
+async function planUninstallDirectories(args: {
+  baseDir: string;
+  files: PlannedUninstallFile[];
+  pruneEmptyDirs?: boolean;
+}): Promise<PlannedUninstallDirectory[]> {
+  if (args.pruneEmptyDirs !== true) {
+    return [];
+  }
+
+  const deleteRelPaths = new Set(args.files.filter((file) => file.action === "delete").map((file) => file.relPath));
+  const candidateRelDirs: string[] = [];
+  const seenRelDirs = new Set<string>();
+
+  for (const file of args.files) {
+    if (file.action !== "delete") {
+      continue;
+    }
+
+    for (const relDir of ancestorRelDirs(file.relPath)) {
+      if (relDir === ".threadkit" || relDir.startsWith(".threadkit/") || seenRelDirs.has(relDir)) {
+        continue;
+      }
+
+      seenRelDirs.add(relDir);
+      candidateRelDirs.push(relDir);
+    }
+  }
+
+  const directories: PlannedUninstallDirectory[] = [];
+  const pruneRelDirs = new Set<string>();
+
+  for (const relDir of candidateRelDirs) {
+    const directoryPath = resolveInsideBaseDir(args.baseDir, relDir);
+    let entries: Array<{ name: string; isDirectory: () => boolean }>;
+
+    try {
+      entries = await readdir(directoryPath, { withFileTypes: true });
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+      if (code !== "ENOENT") {
+        throw error;
+      }
+
+      continue;
+    }
+
+    const emptyAfterDeletes = entries.every((entry) => {
+      const entryRelPath = `${relDir}/${entry.name}`;
+      return deleteRelPaths.has(entryRelPath) || (entry.isDirectory() && pruneRelDirs.has(entryRelPath));
+    });
+
+    if (emptyAfterDeletes) {
+      pruneRelDirs.add(relDir);
+      directories.push({
+        path: directoryPath,
+        relPath: relDir,
+        action: "prune"
+      });
+    }
+  }
+
+  return directories;
+}
+
 export async function buildUninstallPlan(args: {
   manifest: InstallManifest;
   target: string;
   scope: InstallScope;
   baseDir: string;
+  pruneEmptyDirs?: boolean;
 }): Promise<UninstallPlan> {
   assertManifestMatches(args);
 
@@ -501,6 +613,12 @@ export async function buildUninstallPlan(args: {
     });
   }
 
+  const directories = await planUninstallDirectories({
+    baseDir: args.baseDir,
+    files,
+    pruneEmptyDirs: args.pruneEmptyDirs
+  });
+
   return {
     target: args.manifest.target,
     profile: args.manifest.profile,
@@ -508,12 +626,14 @@ export async function buildUninstallPlan(args: {
     baseDir: resolve(args.baseDir),
     manifestPath: manifestPathForBaseDir(args.baseDir),
     files,
+    directories,
     warnings: []
   };
 }
 
 export async function applyUninstallPlan(args: { plan: UninstallPlan }): Promise<ApplyUninstallPlanResult> {
   const files: AppliedUninstallFile[] = [];
+  const directories: AppliedUninstallDirectory[] = [];
 
   for (const planned of args.plan.files) {
     const outputPath = resolveInsideBaseDir(args.plan.baseDir, planned.relPath);
@@ -552,9 +672,31 @@ export async function applyUninstallPlan(args: { plan: UninstallPlan }): Promise
     files.push(applied);
   }
 
+  for (const planned of args.plan.directories) {
+    const directoryPath = resolveInsideBaseDir(args.plan.baseDir, planned.relPath);
+    const applied: AppliedUninstallDirectory = { ...planned, path: directoryPath, pruned: false };
+
+    if (planned.action === "prune") {
+      try {
+        await rmdir(directoryPath);
+        applied.pruned = true;
+      } catch (error) {
+        const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+        if (code === "ENOTEMPTY" || code === "EEXIST") {
+          applied.action = "skip-nonempty";
+        } else if (code !== "ENOENT") {
+          throw error;
+        }
+      }
+    }
+
+    directories.push(applied);
+  }
+
   return {
     manifestPath: args.plan.manifestPath,
-    files
+    files,
+    directories
   };
 }
 
@@ -611,6 +753,7 @@ export async function buildRollbackPlan(args: {
   target: string;
   scope: InstallScope;
   baseDir: string;
+  force?: boolean;
 }): Promise<RollbackPlan> {
   assertManifestMatches(args);
 
@@ -653,6 +796,10 @@ export async function buildRollbackPlan(args: {
       action = current.action;
       marker = current.marker;
       currentHash = current.sha256;
+
+      if (args.force === true && action === "skip-drifted" && marker) {
+        action = "force-restore";
+      }
     }
 
     files.push({
@@ -661,6 +808,7 @@ export async function buildRollbackPlan(args: {
       action,
       marker,
       sha256: currentHash,
+      ...(action === "force-restore" ? { installedSha256: file.sha256 } : {}),
       ...(backupPath === undefined ? {} : { backupPath })
     });
   }
@@ -676,14 +824,21 @@ export async function buildRollbackPlan(args: {
   };
 }
 
-export async function applyRollbackPlan(args: { plan: RollbackPlan }): Promise<ApplyRollbackPlanResult> {
+export async function applyRollbackPlan(args: { plan: RollbackPlan; force?: boolean }): Promise<ApplyRollbackPlanResult> {
   const files: AppliedRollbackFile[] = [];
 
   for (const planned of args.plan.files) {
     const outputPath = resolveInsideBaseDir(args.plan.baseDir, planned.relPath);
     const applied: AppliedRollbackFile = { ...planned, path: outputPath, restored: false };
 
-    if (planned.action === "restore") {
+    if (planned.action === "restore" || planned.action === "force-restore") {
+      const expectedSha256 = planned.action === "force-restore" ? planned.installedSha256 : planned.sha256;
+      if (expectedSha256 === undefined) {
+        applied.action = "skip-current";
+        files.push(applied);
+        continue;
+      }
+
       if (planned.backupPath === undefined) {
         applied.action = "no-backup";
         files.push(applied);
@@ -717,14 +872,23 @@ export async function applyRollbackPlan(args: { plan: RollbackPlan }): Promise<A
 
       const current = await currentRollbackState({
         outputPath,
-        expectedSha256: planned.sha256,
+        expectedSha256,
         fallbackMarker: planned.marker
       });
-      applied.action = current.action;
+      if (planned.action === "force-restore") {
+        applied.action =
+          args.force === true && current.action === "skip-drifted" && current.marker
+            ? "force-restore"
+            : current.action === "restore"
+              ? "skip-current"
+              : current.action;
+      } else {
+        applied.action = current.action;
+      }
       applied.marker = current.marker;
       applied.sha256 = current.sha256;
 
-      if (applied.action === "restore") {
+      if (applied.action === "restore" || applied.action === "force-restore") {
         await mkdir(dirname(outputPath), { recursive: true });
         await writeFile(outputPath, backup);
         applied.restored = true;
@@ -781,6 +945,7 @@ export async function applyInstallPlan(args: {
 
   const manifestPath = manifestPathForBaseDir(args.plan.baseDir);
   const manifest: InstallManifest = {
+    schemaVersion: 1,
     target: args.plan.target,
     profile: args.plan.profile,
     scope: args.plan.scope,
