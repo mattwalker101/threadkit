@@ -1139,6 +1139,13 @@ export async function applyInstallPlan(args: {
   }
 
   const timestamp = timestampForPath(args.timestamp);
+  const existingIndex = await loadBackupIndex({ baseDir: args.plan.baseDir });
+  let generationId = timestamp;
+  let collisionSuffix = 0;
+  while (existingIndex.generations.some((g) => g.id === generationId)) {
+    collisionSuffix += 1;
+    generationId = `${timestamp}-${collisionSuffix}`;
+  }
   const renderFiles = contentByRelPath(args.plan.target, args.render);
   const appliedFiles: AppliedInstallFile[] = [];
 
@@ -1154,7 +1161,7 @@ export async function applyInstallPlan(args: {
 
       if (planned.action === "overwrite" || planned.action === "overwrite-foreign") {
         const existing = await readFile(planned.path);
-        const backupPath = join(args.plan.baseDir, ".threadkit", "backups", timestamp, planned.relPath);
+        const backupPath = join(args.plan.baseDir, ".threadkit", "backups", generationId, planned.relPath);
         await mkdir(dirname(backupPath), { recursive: true });
         await writeFile(backupPath, existing);
         applied.backupPath = backupPath;
@@ -1192,8 +1199,7 @@ export async function applyInstallPlan(args: {
 
   const backedUpFiles = manifest.files.filter((file): file is BackupGenerationFile => file.backupPath !== undefined);
   if (backedUpFiles.length > 0) {
-    const existingIndex = await loadBackupIndex({ baseDir: args.plan.baseDir });
-    const backupDir = join(args.plan.baseDir, ".threadkit", "backups", timestamp);
+    const backupDir = join(args.plan.baseDir, ".threadkit", "backups", generationId);
     await writeBackupIndex({
       baseDir: args.plan.baseDir,
       index: {
@@ -1201,7 +1207,7 @@ export async function applyInstallPlan(args: {
         generations: [
           ...existingIndex.generations,
           {
-            id: timestamp,
+            id: generationId,
             target: args.plan.target,
             profile: args.plan.profile,
             scope: args.plan.scope,

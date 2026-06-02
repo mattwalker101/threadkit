@@ -420,6 +420,32 @@ describe("install application", () => {
     });
   });
 
+  it("assigns a unique generation id when two installs share the same timestamp", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const v1 = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nV1\n";
+    const v2 = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nV2\n";
+    const v3 = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nV3\n";
+    const ts = "2026-06-01T10-00-00-000Z";
+
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, v1);
+
+    const plan1 = await buildPlan({ target: "claude", profile: "minimal", scope: "user", baseDir, render: render([file(v2)]), managedOnly: true });
+    await applyInstallPlan({ plan: plan1, render: render([file(v2)]), timestamp: ts });
+
+    const plan2 = await buildPlan({ target: "claude", profile: "minimal", scope: "user", baseDir, render: render([file(v3)]), managedOnly: true });
+    await applyInstallPlan({ plan: plan2, render: render([file(v3)]), timestamp: ts });
+
+    const index = await loadBackupIndex({ baseDir });
+    expect(index.generations).toHaveLength(2);
+    const ids = index.generations.map((g) => g.id);
+    expect(ids).toContain(ts);
+    expect(ids).toContain(`${ts}-1`);
+    const backupDirs = index.generations.map((g) => g.backupDir);
+    expect(new Set(backupDirs).size).toBe(2);
+  });
+
   it("does not create a backup-index generation for create-only or unchanged installs", async () => {
     const baseDir = await makeTempRoot();
     const generated = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
