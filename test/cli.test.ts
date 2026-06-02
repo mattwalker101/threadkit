@@ -1856,6 +1856,283 @@ describe("threadkit CLI", () => {
     });
   });
 
+  it("lists backup generations as text and JSON", async () => {
+    const cwd = await makeTempRoot();
+    const baseDir = join(cwd, ".claude", "skills");
+    const backupDir = join(baseDir, ".threadkit", "backups", "gen-1");
+    await mkdir(join(baseDir, ".threadkit"), { recursive: true });
+    await writeFile(
+      join(baseDir, ".threadkit", "backup-index.json"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          generations: [
+            {
+              id: "gen-1",
+              target: "claude",
+              profile: "minimal",
+              scope: "project",
+              baseDir,
+              installedAt: "2026-06-01T10-00-00-000Z",
+              backupDir,
+              files: []
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`
+    );
+    const text = makeHarness(cwd);
+
+    await text.program.parseAsync(["node", "threadkit", "backups", "list", "claude", "--scope", "project"]);
+
+    expect(text.stderr).toBe("");
+    expect(text.exitCode).toBe(0);
+    expect(text.stdout).toBe(`gen-1\t2026-06-01T10-00-00-000Z\tminimal\t${backupDir}\n`);
+
+    const json = makeHarness(cwd);
+    await json.program.parseAsync([
+      "node",
+      "threadkit",
+      "backups",
+      "list",
+      "claude",
+      "--scope",
+      "project",
+      "--format",
+      "json"
+    ]);
+
+    expect(json.stderr).toBe("");
+    expect(json.exitCode).toBe(0);
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      ok: true,
+      target: "claude",
+      scope: "project",
+      baseDir,
+      generations: [{ id: "gen-1", backupDir }]
+    });
+  });
+
+  it("dry-runs and applies backup pruning", async () => {
+    const cwd = await makeTempRoot();
+    const baseDir = join(cwd, ".claude", "skills");
+    const oldBackupDir = join(baseDir, ".threadkit", "backups", "old");
+    const newBackupDir = join(baseDir, ".threadkit", "backups", "new");
+    await mkdir(oldBackupDir, { recursive: true });
+    await mkdir(newBackupDir, { recursive: true });
+    await writeFile(join(oldBackupDir, "old.md"), "old\n");
+    await writeFile(
+      join(baseDir, ".threadkit", "backup-index.json"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          generations: [
+            {
+              id: "new",
+              target: "claude",
+              profile: "minimal",
+              scope: "project",
+              baseDir,
+              installedAt: "2026-06-01T11-00-00-000Z",
+              backupDir: newBackupDir,
+              files: []
+            },
+            {
+              id: "old",
+              target: "claude",
+              profile: "minimal",
+              scope: "project",
+              baseDir,
+              installedAt: "2026-06-01T10-00-00-000Z",
+              backupDir: oldBackupDir,
+              files: []
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`
+    );
+    const dryRun = makeHarness(cwd);
+
+    await dryRun.program.parseAsync([
+      "node",
+      "threadkit",
+      "backups",
+      "prune",
+      "claude",
+      "--scope",
+      "project",
+      "--keep",
+      "1",
+      "--format",
+      "json"
+    ]);
+
+    expect(dryRun.stderr).toBe("");
+    expect(dryRun.exitCode).toBe(0);
+    expect(await readFile(join(oldBackupDir, "old.md"), "utf8")).toBe("old\n");
+    expect(JSON.parse(dryRun.stdout)).toMatchObject({
+      ok: true,
+      dryRun: true,
+      keep: 1,
+      generations: [{ id: "old", action: "delete" }],
+      retained: [{ id: "new" }]
+    });
+
+    const apply = makeHarness(cwd);
+    await apply.program.parseAsync([
+      "node",
+      "threadkit",
+      "backups",
+      "prune",
+      "claude",
+      "--scope",
+      "project",
+      "--keep",
+      "1",
+      "--apply",
+      "--format",
+      "json"
+    ]);
+
+    expect(apply.stderr).toBe("");
+    expect(apply.exitCode).toBe(0);
+    await expect(stat(oldBackupDir)).rejects.toThrow();
+    expect(JSON.parse(apply.stdout)).toMatchObject({
+      ok: true,
+      dryRun: false,
+      generations: [{ id: "old", deleted: true }],
+      retained: [{ id: "new" }]
+    });
+  });
+
+  it("rolls back a named backup generation", async () => {
+    const cwd = await makeTempRoot();
+    const baseDir = join(cwd, ".claude", "skills");
+    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
+    const backupPath = join(baseDir, ".threadkit", "backups", "first", "skills", "handoff", "SKILL.md");
+    const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
+    const original = "Original\n";
+    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
+    await mkdir(join(baseDir, ".threadkit", "backups", "first", "skills", "handoff"), { recursive: true });
+    await writeFile(outputPath, current);
+    await writeFile(backupPath, original);
+    await writeFile(
+      join(baseDir, ".threadkit", "backup-index.json"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          generations: [
+            {
+              id: "first",
+              target: "claude",
+              profile: "minimal",
+              scope: "project",
+              baseDir,
+              installedAt: "2026-06-01T10-00-00-000Z",
+              backupDir: join(baseDir, ".threadkit", "backups", "first"),
+              files: [
+                {
+                  path: outputPath,
+                  relPath: "skills/handoff/SKILL.md",
+                  action: "overwrite",
+                  sha256: "84e47c01608cdc867baa40f3a57801aa8ebcc91c7353e239f79215187e55a2d1",
+                  marker: true,
+                  existingIsForeign: false,
+                  backupPath
+                }
+              ]
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`
+    );
+    const dryRun = makeHarness(cwd);
+
+    await dryRun.program.parseAsync([
+      "node",
+      "threadkit",
+      "rollback",
+      "claude",
+      "--scope",
+      "project",
+      "--generation",
+      "first",
+      "--format",
+      "json"
+    ]);
+
+    expect(dryRun.stderr).toBe("");
+    expect(dryRun.exitCode).toBe(0);
+    expect(JSON.parse(dryRun.stdout)).toMatchObject({
+      ok: true,
+      dryRun: true,
+      generation: "first",
+      manifestPath: join(baseDir, ".threadkit", "backup-index.json"),
+      files: [{ action: "restore", relPath: "skills/handoff/SKILL.md" }]
+    });
+
+    const apply = makeHarness(cwd);
+    await apply.program.parseAsync([
+      "node",
+      "threadkit",
+      "rollback",
+      "claude",
+      "--scope",
+      "project",
+      "--generation",
+      "first",
+      "--apply",
+      "--format",
+      "json"
+    ]);
+
+    expect(apply.stderr).toBe("");
+    expect(apply.exitCode).toBe(0);
+    expect(await readFile(outputPath, "utf8")).toBe(original);
+    expect(JSON.parse(apply.stdout)).toMatchObject({
+      ok: true,
+      dryRun: false,
+      generation: "first",
+      restored: 1
+    });
+  });
+
+  it("reports a missing rollback generation as a JSON usage fault", async () => {
+    const cwd = await makeTempRoot();
+    const baseDir = join(cwd, ".claude", "skills");
+    await mkdir(join(baseDir, ".threadkit"), { recursive: true });
+    await writeFile(join(baseDir, ".threadkit", "backup-index.json"), '{"schemaVersion":1,"generations":[]}\n');
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "rollback",
+      "claude",
+      "--scope",
+      "project",
+      "--generation",
+      "missing",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(2);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: false,
+      target: "claude",
+      errors: [{ code: "missing-backup-generation" }],
+      warnings: []
+    });
+  });
+
   it("reports a missing rollback manifest as a JSON usage fault", async () => {
     const cwd = await makeTempRoot();
     const harness = makeHarness(cwd);

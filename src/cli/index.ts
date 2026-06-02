@@ -3,6 +3,8 @@ import { Command } from "commander";
 import { pathToFileURL } from "node:url";
 import {
   runAudit,
+  runBackupList,
+  runBackupPrune,
   runExport,
   runInstall,
   runList,
@@ -100,7 +102,28 @@ export function createProgram(context: CommandContext = defaultContext): Command
     .option("--format <format>", "Output format: text or json.")
     .option("--apply", "Apply the rollback plan.")
     .option("--force", "Restore over drifted ThreadKit-managed files.")
+    .option("--generation <id>", "Rollback from a named backup generation.")
     .action((target, options) => runRollback(target, options, context));
+
+  const backups = program.command("backups").description("Inspect and prune threadkit backup generations.");
+
+  backups
+    .command("list")
+    .description("List indexed backup generations for a target.")
+    .argument("<target>", "Install target.")
+    .option("--scope <scope>", "Install scope: user or project.")
+    .option("--format <format>", "Output format: text or json.")
+    .action((target, options) => runBackupList(target, options, context));
+
+  backups
+    .command("prune")
+    .description("Prune indexed backup generations for a target.")
+    .argument("<target>", "Install target.")
+    .option("--scope <scope>", "Install scope: user or project.")
+    .option("--keep <count>", "Number of newest generations to keep.", "10")
+    .option("--apply", "Apply the prune plan.")
+    .option("--format <format>", "Output format: text or json.")
+    .action((target, options) => runBackupPrune(target, options, context));
 
   return program;
 }
