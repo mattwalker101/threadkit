@@ -1,3 +1,4 @@
+import { MANAGED_MARKER_TOKEN } from "./marker.js";
 import type { RenderInput, RenderResult, Renderer } from "./renderTypes.js";
 
 const DESCRIPTION_LIMIT = 1024;
@@ -29,7 +30,7 @@ function descriptionForSkill(
 
 function renderSkillFile(input: RenderInput, skill: RenderInput["skills"][number]): { content: string; warning?: string } {
   const { description, warning } = descriptionForSkill(skill, input.target);
-  const marker = `<!-- threadkit:generated target=${input.target} profile=${input.profile} skill=${skill.id} -->`;
+  const marker = `<!-- ${MANAGED_MARKER_TOKEN} target=${input.target} profile=${input.profile} skill=${skill.id} -->`;
   const body = skill.body.trimEnd();
   const content = [
     "---",

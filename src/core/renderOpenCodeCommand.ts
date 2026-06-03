@@ -1,3 +1,4 @@
+import { MANAGED_MARKER_TOKEN } from "./marker.js";
 import type { RenderInput, RenderResult, Renderer } from "./renderTypes.js";
 
 function commandNameForSkill(skill: RenderInput["skills"][number]): string {
@@ -5,7 +6,7 @@ function commandNameForSkill(skill: RenderInput["skills"][number]): string {
 }
 
 function renderCommandFile(input: RenderInput, skill: RenderInput["skills"][number]): string {
-  const marker = `<!-- threadkit:generated target=${input.target} profile=${input.profile} skill=${skill.id} -->`;
+  const marker = `<!-- ${MANAGED_MARKER_TOKEN} target=${input.target} profile=${input.profile} skill=${skill.id} -->`;
   const body = skill.body.trimEnd();
 
   return ["---", `description: ${skill.metadata.summary}`, "---", marker, "", body, ""].join("\n");
