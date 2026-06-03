@@ -1,20 +1,15 @@
+import { enabledSkills, type KnownTarget } from "./renderHelpers.js";
 import { MANAGED_MARKER_TOKEN } from "./marker.js";
 import type { RenderInput, RenderResult, Renderer } from "./renderTypes.js";
 
 const DESCRIPTION_LIMIT = 1024;
 const DESCRIPTION_TRUNCATE_AT = 1021;
 
-type KnownTarget = keyof RenderInput["skills"][number]["metadata"]["targets"];
-
-function asKnownTarget(target: string): KnownTarget {
-  return target as KnownTarget;
-}
-
 function descriptionForSkill(
   skill: RenderInput["skills"][number],
   target: string
 ): { description: string; warning?: string } {
-  const targetKey = asKnownTarget(target);
+  const targetKey = target as KnownTarget;
   const override = skill.metadata.target_overrides?.[targetKey]?.description;
   const description = override ?? skill.metadata.summary;
 
@@ -49,15 +44,8 @@ function renderSkillFile(input: RenderInput, skill: RenderInput["skills"][number
 export function renderSkill(input: RenderInput): RenderResult {
   const files = [];
   const warnings: string[] = [];
-  const targetKey = asKnownTarget(input.target);
 
-  for (const skill of input.skills) {
-    const enabled = skill.metadata.targets[targetKey]?.enabled === true;
-
-    if (!enabled) {
-      continue;
-    }
-
+  for (const skill of enabledSkills(input.skills, input.target as KnownTarget)) {
     const result = renderSkillFile(input, skill);
 
     if (result.warning !== undefined) {

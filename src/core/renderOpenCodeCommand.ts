@@ -1,9 +1,6 @@
+import { commandNameForSkill, enabledSkills } from "./renderHelpers.js";
 import { MANAGED_MARKER_TOKEN } from "./marker.js";
 import type { RenderInput, RenderResult, Renderer } from "./renderTypes.js";
-
-function commandNameForSkill(skill: RenderInput["skills"][number]): string {
-  return skill.metadata.target_overrides?.opencode?.command_name ?? skill.id;
-}
 
 function renderCommandFile(input: RenderInput, skill: RenderInput["skills"][number]): string {
   const marker = `<!-- ${MANAGED_MARKER_TOKEN} target=${input.target} profile=${input.profile} skill=${skill.id} -->`;
@@ -13,10 +10,8 @@ function renderCommandFile(input: RenderInput, skill: RenderInput["skills"][numb
 }
 
 export function renderOpenCodeCommand(input: RenderInput): RenderResult {
-  const files = input.skills
-    .filter((skill) => skill.metadata.targets.opencode?.enabled === true)
-    .map((skill) => ({
-      relPath: `opencode/command/${commandNameForSkill(skill)}.md`,
+  const files = enabledSkills(input.skills, "opencode").map((skill) => ({
+      relPath: `opencode/command/${commandNameForSkill(skill, "opencode")}.md`,
       content: renderCommandFile(input, skill),
       marker: true
     }));
