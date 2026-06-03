@@ -7,9 +7,8 @@ const DESCRIPTION_TRUNCATE_AT = 1021;
 
 function descriptionForSkill(
   skill: RenderInput["skills"][number],
-  target: string
+  targetKey: KnownTarget
 ): { description: string; warning?: string } {
-  const targetKey = target as KnownTarget;
   const override = skill.metadata.target_overrides?.[targetKey]?.description;
   const description = override ?? skill.metadata.summary;
 
@@ -19,12 +18,12 @@ function descriptionForSkill(
 
   return {
     description: `${description.slice(0, DESCRIPTION_TRUNCATE_AT)}...`,
-    warning: `Skill '${skill.id}' description for target '${target}' exceeded 1024 characters and was truncated.`
+    warning: `Skill '${skill.id}' description for target '${targetKey}' exceeded 1024 characters and was truncated.`
   };
 }
 
-function renderSkillFile(input: RenderInput, skill: RenderInput["skills"][number]): { content: string; warning?: string } {
-  const { description, warning } = descriptionForSkill(skill, input.target);
+function renderSkillFile(input: RenderInput, skill: RenderInput["skills"][number], targetKey: KnownTarget): { content: string; warning?: string } {
+  const { description, warning } = descriptionForSkill(skill, targetKey);
   const marker = `<!-- ${MANAGED_MARKER_TOKEN} target=${input.target} profile=${input.profile} skill=${skill.id} -->`;
   const body = skill.body.trimEnd();
   const content = [
@@ -44,9 +43,10 @@ function renderSkillFile(input: RenderInput, skill: RenderInput["skills"][number
 export function renderSkill(input: RenderInput): RenderResult {
   const files = [];
   const warnings: string[] = [];
+  const targetKey = input.target as KnownTarget;
 
-  for (const skill of enabledSkills(input.skills, input.target as KnownTarget)) {
-    const result = renderSkillFile(input, skill);
+  for (const skill of enabledSkills(input.skills, targetKey)) {
+    const result = renderSkillFile(input, skill, targetKey);
 
     if (result.warning !== undefined) {
       warnings.push(result.warning);

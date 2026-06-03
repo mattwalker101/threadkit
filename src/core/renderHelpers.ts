@@ -8,6 +8,6 @@ export function enabledSkills(skills: Skill[], targetKey: KnownTarget): Skill[] 
   return skills.filter((skill) => skill.metadata.targets[targetKey]?.enabled === true);
 }
 
-export function commandNameForSkill(skill: Skill, targetKey: "opencode" | "gemini"): string {
+export function commandNameForSkill(skill: Skill, targetKey: KnownTarget): string {
   return skill.metadata.target_overrides?.[targetKey]?.command_name ?? skill.id;
 }
