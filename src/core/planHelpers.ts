@@ -10,8 +10,7 @@ import type {
   BackupGeneration,
   InstallScope,
   ResolveInstallBaseDirArgs,
-  ResolvedInstallBaseDir,
-  RollbackAction
+  ResolvedInstallBaseDir
 } from "./planTypes.js";
 
 function assertInstallScope(scope: string): asserts scope is InstallScope {
@@ -87,8 +86,12 @@ export function sha256(content: Buffer | string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
+function backupRootForBaseDir(baseDir: string): string {
+  return join(baseDir, ".threadkit", "backups");
+}
+
 export function resolveBackupPath(baseDir: string, backupPath: string): string | undefined {
-  const backupRoot = join(baseDir, ".threadkit", "backups");
+  const backupRoot = backupRootForBaseDir(baseDir);
   const resolvedBackupPath = isAbsolute(backupPath) ? resolve(backupPath) : resolve(baseDir, backupPath);
 
   if (!isInsideDirectory(backupRoot, resolvedBackupPath)) {
@@ -104,7 +107,7 @@ export function stripTargetPrefix(target: string, relPath: string): string {
 }
 
 export function isSafeBackupDir(baseDir: string, backupDir: string): boolean {
-  return isInsideDirectory(join(baseDir, ".threadkit", "backups"), backupDir);
+  return isInsideDirectory(backupRootForBaseDir(baseDir), backupDir);
 }
 
 export async function currentRollbackState(args: {
