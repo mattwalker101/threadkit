@@ -147,6 +147,6 @@ describe("export writer", () => {
         outDir: root,
         files: [{ relPath: "../escape.md", content: "nope", marker: false }]
       })
-    ).rejects.toThrow("Export file path '../escape.md' escapes the output directory.");
+    ).rejects.toThrow("Export file path '../escape.md' escapes the base directory.");
   });
 });
