@@ -6,8 +6,9 @@ Install lifecycle hardening is merged through PR 31.
 
 The CLI now supports safe install, manifest-based uninstall, rollback from the
 latest manifest or a named backup generation, backup generation listing, and
-backup pruning. The most recent slice kept `src/cli/commands.ts` as the CLI
-adapter and consolidated duplicated lifecycle behavior into core helpers.
+backup pruning, including opt-in orphan backup cleanup. The most recent slice
+kept `src/cli/commands.ts` as the CLI adapter and consolidated duplicated
+lifecycle behavior into core helpers.
 
 ## Current Goal
 
@@ -21,10 +22,6 @@ manifest. Rollback restores only from backup paths proven to be inside
 files.
 
 ## Known gaps (intentionally deferred)
-
-Orphan backup directories — directories written to `<baseDir>/.threadkit/backups/`
-during a failed install before the index is updated — are not detected or cleaned up.
-They must be removed manually.
 
 Full install lifecycle extraction from `src/cli/commands.ts` is deferred until
 there is a second adapter or a smaller orchestration interface worth extracting.

@@ -57,12 +57,18 @@ Lists indexed backup generations for a target, newest first. Each row:
 `<id>  <installedAt>  <profile>  <backupDir>`
 
 ```
-threadkit backups prune <target> [--scope user|project] [--keep <n>] [--apply]
+threadkit backups prune <target> [--scope user|project] [--keep <n>] [--orphans] [--apply]
 ```
 
 Dry-runs (or applies) pruning of old backup generations. Keeps the `--keep` newest
 (default 10). Only deletes directories confirmed to be inside
-`<baseDir>/.threadkit/backups/`. Updates the backup index after deletion.
+`<baseDir>/.threadkit/backups/`. Updates the backup index after indexed
+generation deletion.
+
+Pass `--orphans` to also scan direct child directories of
+`<baseDir>/.threadkit/backups/` that are not referenced by the backup index.
+Orphans are reported in dry-run output and deleted only with `--apply`; orphan
+deletion does not update the backup index.
 
 ## Development
 

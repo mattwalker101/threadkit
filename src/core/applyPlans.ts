@@ -15,6 +15,7 @@ import { loadBackupIndex, writeBackupIndex } from "./manifestIO.js";
 import {
   InstallPlanUsageError,
   type AppliedBackupPruneGeneration,
+  type AppliedBackupPruneOrphan,
   type AppliedInstallFile,
   type AppliedRollbackFile,
   type AppliedUninstallDirectory,
@@ -204,6 +205,7 @@ export async function applyBackupPrunePlan(args: {
   plan: BackupPrunePlan;
 }): Promise<ApplyBackupPrunePlanResult> {
   const generations: AppliedBackupPruneGeneration[] = [];
+  const orphans: AppliedBackupPruneOrphan[] = [];
   const deletedIds = new Set<string>();
 
   for (const planned of args.plan.generations) {
@@ -220,6 +222,19 @@ export async function applyBackupPrunePlan(args: {
     generations.push(applied);
   }
 
+  for (const planned of args.plan.orphans) {
+    const applied: AppliedBackupPruneOrphan = { ...planned, deleted: false };
+
+    if (planned.action === "delete" && isSafeBackupDir(args.plan.baseDir, planned.path)) {
+      await rm(planned.path, { recursive: true, force: true });
+      applied.deleted = true;
+    } else if (planned.action === "delete") {
+      applied.action = "unsafe-backup-dir";
+    }
+
+    orphans.push(applied);
+  }
+
   const index: BackupIndex = {
     schemaVersion: 1,
     generations: args.plan.index.generations.filter((generation) => !deletedIds.has(generation.id))
@@ -229,6 +244,7 @@ export async function applyBackupPrunePlan(args: {
   return {
     indexPath,
     generations,
+    orphans,
     retained: args.plan.retained
   };
 }

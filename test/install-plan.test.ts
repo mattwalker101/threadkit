@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -1818,6 +1818,120 @@ describe("backup pruning", () => {
       "new",
       "unsafe"
     ]);
+  });
+
+  it("does not include orphan backups unless requested", async () => {
+    const baseDir = await makeTempRoot();
+    const orphanDir = join(baseDir, ".threadkit", "backups", "orphan");
+    await mkdir(orphanDir, { recursive: true });
+    const index = {
+      schemaVersion: 1 as const,
+      generations: []
+    };
+
+    const plan = buildBackupPrunePlan({ index, baseDir, target: "claude", scope: "user", keep: 10 });
+
+    expect(plan.orphans).toEqual([]);
+  });
+
+  it("plans only unindexed direct backup directories as orphan deletes", async () => {
+    const baseDir = await makeTempRoot();
+    const orphanDir = join(baseDir, ".threadkit", "backups", "orphan");
+    const indexedDir = join(baseDir, ".threadkit", "backups", "indexed-other-target");
+    const nestedDir = join(orphanDir, "nested");
+    await mkdir(nestedDir, { recursive: true });
+    await mkdir(indexedDir, { recursive: true });
+    await writeFile(join(baseDir, ".threadkit", "backups", "file.txt"), "ignored\n");
+    await symlink(orphanDir, join(baseDir, ".threadkit", "backups", "link"));
+    const index = {
+      schemaVersion: 1 as const,
+      generations: [
+        {
+          id: "indexed-other-target",
+          target: "codex",
+          profile: "minimal",
+          scope: "project" as const,
+          baseDir,
+          installedAt: "2026-06-01T11-00-00-000Z",
+          backupDir: indexedDir,
+          files: []
+        }
+      ]
+    };
+
+    const plan = buildBackupPrunePlan({
+      index,
+      baseDir,
+      target: "claude",
+      scope: "user",
+      keep: 10,
+      includeOrphans: true
+    });
+
+    expect(plan.orphans).toEqual([
+      {
+        path: orphanDir,
+        relPath: "orphan",
+        action: "delete"
+      }
+    ]);
+  });
+
+  it("returns no orphan backups when the backup root is missing", async () => {
+    const baseDir = await makeTempRoot();
+    const index = {
+      schemaVersion: 1 as const,
+      generations: []
+    };
+
+    const plan = buildBackupPrunePlan({
+      index,
+      baseDir,
+      target: "claude",
+      scope: "user",
+      includeOrphans: true
+    });
+
+    expect(plan.orphans).toEqual([]);
+  });
+
+  it("applies orphan backup pruning without mutating indexed generations", async () => {
+    const baseDir = await makeTempRoot();
+    const orphanDir = join(baseDir, ".threadkit", "backups", "orphan");
+    const indexedDir = join(baseDir, ".threadkit", "backups", "indexed");
+    await mkdir(orphanDir, { recursive: true });
+    await mkdir(indexedDir, { recursive: true });
+    await writeFile(join(orphanDir, "old.md"), "old\n");
+    const index = {
+      schemaVersion: 1 as const,
+      generations: [
+        {
+          id: "indexed",
+          target: "claude",
+          profile: "minimal",
+          scope: "user" as const,
+          baseDir,
+          installedAt: "2026-06-01T11-00-00-000Z",
+          backupDir: indexedDir,
+          files: []
+        }
+      ]
+    };
+    await writeBackupIndex({ baseDir, index });
+    const plan = buildBackupPrunePlan({
+      index,
+      baseDir,
+      target: "claude",
+      scope: "user",
+      keep: 10,
+      includeOrphans: true
+    });
+
+    const result = await applyBackupPrunePlan({ plan });
+
+    await expect(stat(orphanDir)).rejects.toThrow();
+    expect(result.orphans).toMatchObject([{ path: orphanDir, action: "delete", deleted: true }]);
+    expect((await loadBackupIndex({ baseDir })).generations).toEqual(index.generations);
   });
 });
 
