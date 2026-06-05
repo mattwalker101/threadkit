@@ -35,7 +35,14 @@ export async function auditLibrary(library: LoadedLibrary): Promise<AuditResult>
 async function auditSkill(skill: LoadedSkill): Promise<AuditWarning[]> {
   const warnings: AuditWarning[] = [];
   const body = skill.body;
-  const bodyLines = body.replace(/\r\n/g, "\n").split("\n").length;
+  const bodyTextLines = body.replace(/\r\n/g, "\n").split("\n");
+  const bodyLines = bodyTextLines.length;
+  const normalizedHeadings = new Set(
+    bodyTextLines
+      .map((line) => /^##\s+(.+?)\s*$/.exec(line.trim()))
+      .filter((match): match is RegExpExecArray => match !== null)
+      .map((match) => match[1].toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " "))
+  );
   const lowerBody = body.toLowerCase();
 
   if (bodyLines > bodyLineLimit) {
@@ -46,7 +53,7 @@ async function auditSkill(skill: LoadedSkill): Promise<AuditWarning[]> {
     });
   }
 
-  if (!hasHeading(body, "Output format")) {
+  if (!normalizedHeadings.has("output format")) {
     warnings.push({
       code: "missing-output-format-anchor",
       message: `Skill '${skill.id}' is missing a '## Output format' section.`,
@@ -54,7 +61,7 @@ async function auditSkill(skill: LoadedSkill): Promise<AuditWarning[]> {
     });
   }
 
-  if (!hasHeading(body, "What not to do")) {
+  if (!normalizedHeadings.has("what not to do")) {
     warnings.push({
       code: "missing-what-not-to-do-anchor",
       message: `Skill '${skill.id}' is missing a '## What not to do' section.`,
@@ -63,7 +70,9 @@ async function auditSkill(skill: LoadedSkill): Promise<AuditWarning[]> {
   }
 
   for (const trigger of skill.metadata.triggers) {
-    if (weakTriggers.has(normalizeText(trigger))) {
+    const normalizedTrigger = trigger.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+
+    if (weakTriggers.has(normalizedTrigger)) {
       warnings.push({
         code: "weak-trigger",
         message: `Skill '${skill.id}' has a low-information trigger: '${trigger}'.`,
@@ -146,12 +155,21 @@ function auditTriggerOverlap(skills: LoadedSkill[]): AuditWarning[] {
 }
 
 function hasOverlappingTriggers(left: LoadedSkill, right: LoadedSkill): boolean {
+  const tokensFor = (value: string): string[] =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+      .replace(/\s+/g, " ")
+      .split(" ")
+      .filter((token) => token.length > 0 && !stopWords.has(token));
+
   for (const leftTrigger of left.metadata.triggers) {
-    const leftTokens = triggerTokens(leftTrigger);
+    const leftTokens = tokensFor(leftTrigger);
     const leftKey = leftTokens.join(" ");
 
     for (const rightTrigger of right.metadata.triggers) {
-      const rightTokens = triggerTokens(rightTrigger);
+      const rightTokens = tokensFor(rightTrigger);
       const rightKey = rightTokens.join(" ");
 
       if (leftKey.length > 0 && leftKey === rightKey) {
@@ -168,28 +186,6 @@ function hasOverlappingTriggers(left: LoadedSkill, right: LoadedSkill): boolean 
   }
 
   return false;
-}
-
-function hasHeading(body: string, heading: string): boolean {
-  const expected = normalizeText(heading);
-
-  return body
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .some((line) => {
-      const match = /^##\s+(.+?)\s*$/.exec(line.trim());
-      return match ? normalizeText(match[1]) === expected : false;
-    });
-}
-
-function normalizeText(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
-}
-
-function triggerTokens(value: string): string[] {
-  return normalizeText(value)
-    .split(" ")
-    .filter((token) => token.length > 0 && !stopWords.has(token));
 }
 
 function mentionsShell(body: string): boolean {
