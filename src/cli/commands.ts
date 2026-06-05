@@ -19,21 +19,37 @@ import {
   loadLibrary,
   resolveInstallBaseDir,
   resolveProfile,
-  writeExportFiles,
-  type AuditWarning,
-  type BackupGeneration,
-  type BackupPrunePlan,
-  type ApplyInstallPlanResult,
-  type ApplyUninstallPlanResult,
-  type ApplyRollbackPlanResult,
-  type ApplyBackupPrunePlanResult,
-  type LoadedSkill,
-  type RollbackPlan,
-  type UninstallPlan,
-  type WritePlan
+  writeExportFiles
 } from "../core/index.js";
-
-export type OutputFormat = "text" | "json";
+import {
+  formatAuditError,
+  formatAuditSuccess,
+  formatBackupListError,
+  formatBackupListSuccess,
+  formatBackupPruneApplied,
+  formatBackupPruneDryRun,
+  formatBackupPruneError,
+  formatExportError,
+  formatExportSuccess,
+  formatInstallApplied,
+  formatInstallDryRun,
+  formatInstallError,
+  formatListError,
+  formatListSuccess,
+  formatRollbackApplied,
+  formatRollbackDryRun,
+  formatRollbackError,
+  formatShowError,
+  formatShowSuccess,
+  formatUninstallApplied,
+  formatUninstallDryRun,
+  formatUninstallError,
+  formatValidateError,
+  formatValidateSuccess,
+  getFormat,
+  type CliError,
+  type CommandOutput
+} from "./output.js";
 
 export interface CommandContext {
   cwd: string;
@@ -90,11 +106,6 @@ export interface AuditOptions extends RootOptions {
   strict?: boolean;
 }
 
-interface CliError {
-  code: string;
-  message: string;
-}
-
 class CliUsageError extends Error {
   readonly code: string;
 
@@ -102,10 +113,6 @@ class CliUsageError extends Error {
     super(message);
     this.code = code;
   }
-}
-
-function getFormat(format: string | undefined): OutputFormat {
-  return format === "json" ? "json" : "text";
 }
 
 function getRoot(options: RootOptions, context: CommandContext): string {
@@ -149,37 +156,13 @@ function isUsageError(error: unknown): boolean {
   return error instanceof CliUsageError || error instanceof InstallPlanUsageError;
 }
 
-function writeJson(context: CommandContext, value: unknown): void {
-  context.write(`${JSON.stringify(value, null, 2)}\n`);
-}
-
-// ── Shared text-output helpers ────────────────────────────────────────────────
-
-function writeFileListText(
-  context: CommandContext,
-  files: Array<{ action: string; path: string }>
-): void {
-  for (const file of files) {
-    context.write(`${file.action}\t${file.path}\n`);
+function emit(context: CommandContext, output: CommandOutput): void {
+  if (output.stream === "stderr") {
+    context.writeError(output.text);
+    return;
   }
-}
 
-function writeDirectoryListText(
-  context: CommandContext,
-  directories: Array<{ action: string; path: string }>
-): void {
-  for (const directory of directories) {
-    context.write(`${directory.action}\t${directory.path}\n`);
-  }
-}
-
-function writeGenerationListText(
-  context: CommandContext,
-  generations: Array<{ action: string; id: string; backupDir: string }>
-): void {
-  for (const generation of generations) {
-    context.write(`${generation.action}\t${generation.id}\t${generation.backupDir}\n`);
-  }
+  context.write(output.text);
 }
 
 // ── validate ──────────────────────────────────────────────────────────────────
@@ -191,32 +174,11 @@ export async function runValidate(options: RootOptions, context: CommandContext)
   try {
     await loadLibrary(root, { canonical: isDefaultRepoRoot(root, options, context) });
     context.setExitCode(0);
-    formatValidateSuccess(context, format, root);
+    emit(context, formatValidateSuccess(format, root));
   } catch (error) {
     context.setExitCode(1);
-    formatValidateError(context, format, root, normalizeError(error));
+    emit(context, formatValidateError(format, root, normalizeError(error)));
   }
-}
-
-function formatValidateSuccess(context: CommandContext, format: OutputFormat, root: string): void {
-  if (format === "json") {
-    writeJson(context, { ok: true, root, errors: [], warnings: [] });
-    return;
-  }
-  context.write(`Library is valid: ${root}\n`);
-}
-
-function formatValidateError(
-  context: CommandContext,
-  format: OutputFormat,
-  root: string,
-  error: CliError
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: false, root, errors: [error], warnings: [] });
-    return;
-  }
-  context.writeError(`Validation failed: ${error.message}\n`);
 }
 
 // ── audit ─────────────────────────────────────────────────────────────────────
@@ -230,46 +192,11 @@ export async function runAudit(options: AuditOptions, context: CommandContext): 
     const result = await auditLibrary(library);
     const exitCode = options.strict === true && result.warnings.length > 0 ? 1 : 0;
     context.setExitCode(exitCode);
-    formatAuditSuccess(context, format, root, result.warnings);
+    emit(context, formatAuditSuccess(format, root, result.warnings));
   } catch (error) {
     context.setExitCode(1);
-    formatAuditError(context, format, root, normalizeError(error));
+    emit(context, formatAuditError(format, root, normalizeError(error)));
   }
-}
-
-function formatAuditSuccess(
-  context: CommandContext,
-  format: OutputFormat,
-  root: string,
-  warnings: AuditWarning[]
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: true, root, warnings });
-    return;
-  }
-
-  if (warnings.length === 0) {
-    context.write(`Library audit passed: ${root}\n`);
-    return;
-  }
-
-  context.write(`Library audit warnings: ${root}\n`);
-  for (const warning of warnings) {
-    context.write(`${warning.code}\t${warning.message}\n`);
-  }
-}
-
-function formatAuditError(
-  context: CommandContext,
-  format: OutputFormat,
-  root: string,
-  error: CliError
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: false, root, errors: [error], warnings: [] });
-    return;
-  }
-  context.writeError(`Audit failed: ${error.message}\n`);
 }
 
 // ── list ──────────────────────────────────────────────────────────────────────
@@ -288,59 +215,14 @@ export async function runList(options: RootOptions, context: CommandContext): Pr
       profiles: skill.metadata.profiles,
       status: skill.metadata.status
     }));
-    formatListSuccess(context, format, root, skills);
+    emit(context, formatListSuccess(format, root, skills));
   } catch (error) {
     context.setExitCode(1);
-    formatListError(context, format, root, normalizeError(error));
+    emit(context, formatListError(format, root, normalizeError(error)));
   }
-}
-
-function formatListSuccess(
-  context: CommandContext,
-  format: OutputFormat,
-  root: string,
-  skills: Array<{ id: string; name: string; summary: string; profiles: string[]; status: string }>
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: true, root, skills });
-    return;
-  }
-  for (const skill of skills) {
-    context.write(`${skill.id}\t${skill.name}\t${skill.summary}\n`);
-  }
-}
-
-function formatListError(
-  context: CommandContext,
-  format: OutputFormat,
-  root: string,
-  error: CliError
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: false, root, errors: [error], warnings: [] });
-    return;
-  }
-  context.writeError(`List failed: ${error.message}\n`);
 }
 
 // ── show ──────────────────────────────────────────────────────────────────────
-
-function toSkillJson(skill: LoadedSkill) {
-  return {
-    id: skill.id,
-    name: skill.metadata.name,
-    version: skill.metadata.version,
-    status: skill.metadata.status,
-    summary: skill.metadata.summary,
-    category: skill.metadata.category,
-    triggers: skill.metadata.triggers,
-    profiles: skill.metadata.profiles,
-    targets: skill.metadata.targets,
-    safety: skill.metadata.safety,
-    tags: skill.metadata.tags,
-    body: skill.body
-  };
-}
 
 export async function runShow(
   skillId: string,
@@ -359,37 +241,11 @@ export async function runShow(
     }
 
     context.setExitCode(0);
-    formatShowSuccess(context, format, root, skill);
+    emit(context, formatShowSuccess(format, root, skill));
   } catch (error) {
     context.setExitCode(isUsageError(error) ? 2 : 1);
-    formatShowError(context, format, root, normalizeError(error));
+    emit(context, formatShowError(format, root, normalizeError(error)));
   }
-}
-
-function formatShowSuccess(
-  context: CommandContext,
-  format: OutputFormat,
-  root: string,
-  skill: LoadedSkill
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: true, root, skill: toSkillJson(skill) });
-    return;
-  }
-  context.write(`${skill.metadata.name} (${skill.id})\n\n${skill.body}`);
-}
-
-function formatShowError(
-  context: CommandContext,
-  format: OutputFormat,
-  root: string,
-  error: CliError
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: false, root, errors: [error], warnings: [] });
-    return;
-  }
-  context.writeError(`Show failed: ${error.message}\n`);
 }
 
 // ── export ────────────────────────────────────────────────────────────────────
@@ -438,45 +294,25 @@ export async function runExport(
     const files = await writeExportFiles({ outDir, files: result.files });
 
     context.setExitCode(0);
-    formatExportSuccess(context, format, root, target.name, profileName, outDir, files, result.warnings);
+    emit(
+      context,
+      formatExportSuccess({
+        format,
+        root,
+        target: target.name,
+        profile: profileName,
+        outDir,
+        files,
+        warnings: result.warnings
+      })
+    );
   } catch (error) {
     context.setExitCode(isUsageError(error) ? 2 : 1);
-    formatExportError(context, format, root, targetName, profileName, normalizeError(error));
+    emit(
+      context,
+      formatExportError({ format, root, target: targetName, profile: profileName, error: normalizeError(error) })
+    );
   }
-}
-
-function formatExportSuccess(
-  context: CommandContext,
-  format: OutputFormat,
-  root: string,
-  target: string,
-  profile: string,
-  outDir: string,
-  files: Awaited<ReturnType<typeof writeExportFiles>>,
-  warnings: string[]
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: true, root, target, profile, outDir, files, warnings });
-    return;
-  }
-  for (const file of files) {
-    context.write(`Exported ${file.relPath} to ${outDir}\n`);
-  }
-}
-
-function formatExportError(
-  context: CommandContext,
-  format: OutputFormat,
-  root: string,
-  target: string,
-  profile: string | undefined,
-  error: CliError
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: false, root, target, profile, errors: [error], warnings: [] });
-    return;
-  }
-  context.writeError(`Export failed: ${error.message}\n`);
 }
 
 // ── install ───────────────────────────────────────────────────────────────────
@@ -540,91 +376,21 @@ export async function runInstall(
 
     if (options.apply !== true || hasForeignFiles) {
       context.setExitCode(hasForeignFiles ? 1 : 0);
-      formatInstallDryRun(context, format, root, plan);
+      emit(context, formatInstallDryRun(format, root, plan));
       return;
     }
 
     const applied = await applyInstallPlan({ plan, render });
 
     context.setExitCode(0);
-    formatInstallApplied(context, format, root, plan, applied);
+    emit(context, formatInstallApplied(format, root, plan, applied));
   } catch (error) {
     context.setExitCode(isUsageError(error) ? 2 : 1);
-    formatInstallError(context, format, root, targetName, profileName, normalizeError(error));
+    emit(
+      context,
+      formatInstallError({ format, root, target: targetName, profile: profileName, error: normalizeError(error) })
+    );
   }
-}
-
-function formatInstallDryRun(
-  context: CommandContext,
-  format: OutputFormat,
-  root: string,
-  plan: WritePlan
-): void {
-  if (format === "json") {
-    writeJson(context, {
-      ok: true,
-      root,
-      target: plan.target,
-      profile: plan.profile,
-      scope: plan.scope,
-      baseDir: plan.baseDir,
-      dryRun: true,
-      files: plan.files,
-      warnings: plan.warnings
-    });
-    return;
-  }
-  writeFileListText(context, plan.files);
-}
-
-function formatInstallApplied(
-  context: CommandContext,
-  format: OutputFormat,
-  root: string,
-  plan: WritePlan,
-  applied: ApplyInstallPlanResult
-): void {
-  const backups = applied.files
-    .filter((file) => file.backupPath !== undefined)
-    .map((file) => ({ relPath: file.relPath, path: file.path, backupPath: file.backupPath }));
-
-  if (format === "json") {
-    writeJson(context, {
-      ok: true,
-      root,
-      target: plan.target,
-      profile: plan.profile,
-      scope: plan.scope,
-      baseDir: plan.baseDir,
-      dryRun: false,
-      manifestPath: applied.manifestPath,
-      files: applied.files,
-      backups,
-      warnings: plan.warnings
-    });
-    return;
-  }
-
-  writeFileListText(context, applied.files);
-  context.write(`manifest\t${applied.manifestPath}\n`);
-  for (const backup of backups) {
-    context.write(`backup\t${backup.backupPath}\n`);
-  }
-}
-
-function formatInstallError(
-  context: CommandContext,
-  format: OutputFormat,
-  root: string,
-  target: string,
-  profile: string | undefined,
-  error: CliError
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: false, root, target, profile, errors: [error], warnings: [] });
-    return;
-  }
-  context.writeError(`Install failed: ${error.message}\n`);
 }
 
 // ── uninstall ─────────────────────────────────────────────────────────────────
@@ -654,85 +420,18 @@ export async function runUninstall(
 
     if (options.apply !== true) {
       context.setExitCode(0);
-      formatUninstallDryRun(context, format, plan, options.pruneEmptyDirs === true);
+      emit(context, formatUninstallDryRun(format, plan, options.pruneEmptyDirs === true));
       return;
     }
 
     const applied = await applyUninstallPlan({ plan });
 
     context.setExitCode(0);
-    formatUninstallApplied(context, format, plan, applied, options.pruneEmptyDirs === true);
+    emit(context, formatUninstallApplied(format, plan, applied, options.pruneEmptyDirs === true));
   } catch (error) {
     context.setExitCode(isUsageError(error) ? 2 : 1);
-    formatUninstallError(context, format, targetName, normalizeError(error));
+    emit(context, formatUninstallError(format, targetName, normalizeError(error)));
   }
-}
-
-function formatUninstallDryRun(
-  context: CommandContext,
-  format: OutputFormat,
-  plan: UninstallPlan,
-  pruneEmptyDirs: boolean
-): void {
-  if (format === "json") {
-    writeJson(context, {
-      ok: true,
-      target: plan.target,
-      profile: plan.profile,
-      scope: plan.scope,
-      baseDir: plan.baseDir,
-      dryRun: true,
-      pruneEmptyDirs,
-      manifestPath: plan.manifestPath,
-      files: plan.files,
-      directories: plan.directories,
-      warnings: plan.warnings
-    });
-    return;
-  }
-  writeFileListText(context, plan.files);
-  writeDirectoryListText(context, plan.directories);
-}
-
-function formatUninstallApplied(
-  context: CommandContext,
-  format: OutputFormat,
-  plan: UninstallPlan,
-  applied: ApplyUninstallPlanResult,
-  pruneEmptyDirs: boolean
-): void {
-  if (format === "json") {
-    writeJson(context, {
-      ok: true,
-      target: plan.target,
-      profile: plan.profile,
-      scope: plan.scope,
-      baseDir: plan.baseDir,
-      dryRun: false,
-      pruneEmptyDirs,
-      manifestPath: applied.manifestPath,
-      files: applied.files,
-      directories: applied.directories,
-      warnings: plan.warnings
-    });
-    return;
-  }
-  writeFileListText(context, applied.files);
-  writeDirectoryListText(context, applied.directories);
-  context.write(`manifest\t${applied.manifestPath}\n`);
-}
-
-function formatUninstallError(
-  context: CommandContext,
-  format: OutputFormat,
-  target: string,
-  error: CliError
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: false, target, errors: [error], warnings: [] });
-    return;
-  }
-  context.writeError(`Uninstall failed: ${error.message}\n`);
 }
 
 // ── rollback ──────────────────────────────────────────────────────────────────
@@ -785,7 +484,10 @@ export async function runRollback(
 
     if (options.apply !== true) {
       context.setExitCode(0);
-      formatRollbackDryRun(context, format, plan, options.force === true, options.generation);
+      emit(
+        context,
+        formatRollbackDryRun({ format, plan, force: options.force === true, generation: options.generation })
+      );
       return;
     }
 
@@ -793,80 +495,21 @@ export async function runRollback(
     const restored = applied.files.filter((file) => file.restored).length;
 
     context.setExitCode(0);
-    formatRollbackApplied(context, format, plan, applied, options.force === true, options.generation, restored);
+    emit(
+      context,
+      formatRollbackApplied({
+        format,
+        plan,
+        applied,
+        force: options.force === true,
+        generation: options.generation,
+        restored
+      })
+    );
   } catch (error) {
     context.setExitCode(isUsageError(error) ? 2 : 1);
-    formatRollbackError(context, format, targetName, normalizeError(error));
+    emit(context, formatRollbackError(format, targetName, normalizeError(error)));
   }
-}
-
-function formatRollbackDryRun(
-  context: CommandContext,
-  format: OutputFormat,
-  plan: RollbackPlan,
-  force: boolean,
-  generation: string | undefined
-): void {
-  if (format === "json") {
-    writeJson(context, {
-      ok: true,
-      target: plan.target,
-      profile: plan.profile,
-      scope: plan.scope,
-      baseDir: plan.baseDir,
-      dryRun: true,
-      force,
-      ...(generation === undefined ? {} : { generation }),
-      manifestPath: plan.manifestPath,
-      files: plan.files,
-      warnings: plan.warnings
-    });
-    return;
-  }
-  writeFileListText(context, plan.files);
-}
-
-function formatRollbackApplied(
-  context: CommandContext,
-  format: OutputFormat,
-  plan: RollbackPlan,
-  applied: ApplyRollbackPlanResult,
-  force: boolean,
-  generation: string | undefined,
-  restored: number
-): void {
-  if (format === "json") {
-    writeJson(context, {
-      ok: true,
-      target: plan.target,
-      profile: plan.profile,
-      scope: plan.scope,
-      baseDir: plan.baseDir,
-      dryRun: false,
-      force,
-      ...(generation === undefined ? {} : { generation }),
-      manifestPath: applied.manifestPath,
-      files: applied.files,
-      restored,
-      warnings: plan.warnings
-    });
-    return;
-  }
-  writeFileListText(context, applied.files);
-  context.write(`manifest\t${applied.manifestPath}\n`);
-}
-
-function formatRollbackError(
-  context: CommandContext,
-  format: OutputFormat,
-  target: string,
-  error: CliError
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: false, target, errors: [error], warnings: [] });
-    return;
-  }
-  context.writeError(`Rollback failed: ${error.message}\n`);
 }
 
 // ── backup list ───────────────────────────────────────────────────────────────
@@ -894,48 +537,20 @@ export async function runBackupList(
     );
 
     context.setExitCode(0);
-    formatBackupListSuccess(
+    emit(
       context,
-      format,
-      resolvedInstall.target,
-      resolvedInstall.scope,
-      resolvedInstall.baseDir,
-      generations
+      formatBackupListSuccess({
+        format,
+        target: resolvedInstall.target,
+        scope: resolvedInstall.scope,
+        baseDir: resolvedInstall.baseDir,
+        generations
+      })
     );
   } catch (error) {
     context.setExitCode(isUsageError(error) ? 2 : 1);
-    formatBackupListError(context, format, targetName, normalizeError(error));
+    emit(context, formatBackupListError(format, targetName, normalizeError(error)));
   }
-}
-
-function formatBackupListSuccess(
-  context: CommandContext,
-  format: OutputFormat,
-  target: string,
-  scope: string,
-  baseDir: string,
-  generations: BackupGeneration[]
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: true, target, scope, baseDir, generations });
-    return;
-  }
-  for (const generation of generations) {
-    context.write(`${generation.id}\t${generation.installedAt}\t${generation.profile}\t${generation.backupDir}\n`);
-  }
-}
-
-function formatBackupListError(
-  context: CommandContext,
-  format: OutputFormat,
-  target: string,
-  error: CliError
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: false, target, errors: [error], warnings: [] });
-    return;
-  }
-  context.writeError(`Backups list failed: ${error.message}\n`);
 }
 
 // ── backup prune ──────────────────────────────────────────────────────────────
@@ -979,76 +594,16 @@ export async function runBackupPrune(
 
     if (options.apply !== true) {
       context.setExitCode(0);
-      formatBackupPruneDryRun(context, format, plan);
+      emit(context, formatBackupPruneDryRun(format, plan));
       return;
     }
 
     const applied = await applyBackupPrunePlan({ plan });
 
     context.setExitCode(0);
-    formatBackupPruneApplied(context, format, plan, applied);
+    emit(context, formatBackupPruneApplied(format, plan, applied));
   } catch (error) {
     context.setExitCode(isUsageError(error) ? 2 : 1);
-    formatBackupPruneError(context, format, targetName, normalizeError(error));
+    emit(context, formatBackupPruneError(format, targetName, normalizeError(error)));
   }
-}
-
-function formatBackupPruneDryRun(
-  context: CommandContext,
-  format: OutputFormat,
-  plan: BackupPrunePlan
-): void {
-  if (format === "json") {
-    writeJson(context, {
-      ok: true,
-      target: plan.target,
-      scope: plan.scope,
-      baseDir: plan.baseDir,
-      dryRun: true,
-      keep: plan.keep,
-      generations: plan.generations,
-      retained: plan.retained,
-      warnings: plan.warnings
-    });
-    return;
-  }
-  writeGenerationListText(context, plan.generations);
-}
-
-function formatBackupPruneApplied(
-  context: CommandContext,
-  format: OutputFormat,
-  plan: BackupPrunePlan,
-  applied: ApplyBackupPrunePlanResult
-): void {
-  if (format === "json") {
-    writeJson(context, {
-      ok: true,
-      target: plan.target,
-      scope: plan.scope,
-      baseDir: plan.baseDir,
-      dryRun: false,
-      keep: plan.keep,
-      indexPath: applied.indexPath,
-      generations: applied.generations,
-      retained: applied.retained,
-      warnings: plan.warnings
-    });
-    return;
-  }
-  writeGenerationListText(context, applied.generations);
-  context.write(`index\t${applied.indexPath}\n`);
-}
-
-function formatBackupPruneError(
-  context: CommandContext,
-  format: OutputFormat,
-  target: string,
-  error: CliError
-): void {
-  if (format === "json") {
-    writeJson(context, { ok: false, target, errors: [error], warnings: [] });
-    return;
-  }
-  context.writeError(`Backups prune failed: ${error.message}\n`);
 }
