@@ -2,11 +2,11 @@ import { mkdir, readFile, rm, rmdir, unlink, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path";
 import { contentForSpec, resolveSafePathInside } from "./resolveSafePath.js";
 import type { RenderResult, FileSpec } from "./renderTypes.js";
-import { hasManagedMarker } from "./marker.js";
 import {
   currentRollbackState,
   isSafeBackupDir,
   manifestPathForBaseDir,
+  readCurrentManagedFileState,
   resolveBackupPath,
   sha256,
   stripTargetPrefix
@@ -64,28 +64,24 @@ export async function applyUninstallPlan(args: { plan: UninstallPlan }): Promise
     const applied: AppliedUninstallFile = { ...planned, path: outputPath, deleted: false };
 
     if (planned.action === "delete") {
-      let existing: Buffer;
+      const current = await readCurrentManagedFileState({
+        path: outputPath,
+        fallbackMarker: planned.marker,
+        fallbackSha256: planned.sha256
+      });
 
-      try {
-        existing = await readFile(outputPath);
-      } catch (error) {
-        const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
-        if (code !== "ENOENT") {
-          throw error;
-        }
-
+      if (current.kind === "missing") {
         applied.action = "missing";
         files.push(applied);
         continue;
       }
 
-      const currentHash = sha256(existing);
-      applied.marker = hasManagedMarker(existing);
-      applied.sha256 = currentHash;
+      applied.marker = current.marker;
+      applied.sha256 = current.sha256;
 
       if (!applied.marker) {
         applied.action = "skip-foreign";
-      } else if (currentHash !== planned.sha256) {
+      } else if (current.sha256 !== planned.sha256) {
         applied.action = "skip-drifted";
       } else {
         await unlink(outputPath);

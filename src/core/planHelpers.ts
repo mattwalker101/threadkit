@@ -110,15 +110,18 @@ export function isSafeBackupDir(baseDir: string, backupDir: string): boolean {
   return isInsideDirectory(backupRootForBaseDir(baseDir), backupDir);
 }
 
-export async function currentRollbackState(args: {
-  outputPath: string;
-  expectedSha256: string;
+export async function readCurrentManagedFileState(args: {
+  path: string;
   fallbackMarker: boolean;
-}): Promise<{ action: "restore" | "skip-drifted" | "skip-foreign" | "missing"; marker: boolean; sha256: string }> {
-  let existing: Buffer;
+  fallbackSha256: string;
+}): Promise<
+  | { kind: "present"; marker: boolean; sha256: string; content: Buffer }
+  | { kind: "missing"; marker: boolean; sha256: string }
+> {
+  let content: Buffer;
 
   try {
-    existing = await readFile(args.outputPath);
+    content = await readFile(args.path);
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
     if (code !== "ENOENT") {
@@ -126,14 +129,37 @@ export async function currentRollbackState(args: {
     }
 
     return {
-      action: "missing",
+      kind: "missing",
       marker: args.fallbackMarker,
-      sha256: args.expectedSha256
+      sha256: args.fallbackSha256
     };
   }
 
-  const marker = hasManagedMarker(existing);
-  const currentHash = sha256(existing);
+  return {
+    kind: "present",
+    marker: hasManagedMarker(content),
+    sha256: sha256(content),
+    content
+  };
+}
+
+export async function currentRollbackState(args: {
+  outputPath: string;
+  expectedSha256: string;
+  fallbackMarker: boolean;
+}): Promise<{ action: "restore" | "skip-drifted" | "skip-foreign" | "missing"; marker: boolean; sha256: string }> {
+  const current = await readCurrentManagedFileState({
+    path: args.outputPath,
+    fallbackMarker: args.fallbackMarker,
+    fallbackSha256: args.expectedSha256
+  });
+
+  if (current.kind === "missing") {
+    return { action: "missing", marker: current.marker, sha256: current.sha256 };
+  }
+
+  const marker = current.marker;
+  const currentHash = current.sha256;
 
   if (!marker) {
     return { action: "skip-foreign", marker, sha256: currentHash };
