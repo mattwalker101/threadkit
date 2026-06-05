@@ -4,14 +4,16 @@ import { contentForSpec, resolveSafePathInside } from "./resolveSafePath.js";
 import type { RenderResult } from "./renderTypes.js";
 import { hasManagedMarker } from "./marker.js";
 import {
-  InstallPlanUsageError,
   currentRollbackState,
   isSafeBackupDir,
   manifestPathForBaseDir,
   newestGenerationsFirst,
   resolveBackupPath,
   sha256,
-  stripTargetPrefix,
+  stripTargetPrefix
+} from "./planHelpers.js";
+import {
+  InstallPlanUsageError,
   type BackupIndex,
   type BackupPrunePlan,
   type InstallAction,
