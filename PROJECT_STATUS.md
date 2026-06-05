@@ -2,26 +2,32 @@
 
 ## Current Slice
 
-Slice 9 planned: Manifest-Based Uninstall.
+Install lifecycle hardening is merged through PR 31.
 
-This slice stacks on PR 17's install apply work. It reads
-`.threadkit/install-manifest.json` and removes only unchanged ThreadKit-managed
-files from the selected target/scope.
+The CLI now supports safe install, manifest-based uninstall, rollback from the
+latest manifest or a named backup generation, backup generation listing, and
+backup pruning. The most recent slice kept `src/cli/commands.ts` as the CLI
+adapter and consolidated duplicated lifecycle behavior into core helpers.
 
 ## Current Goal
 
-Add safe uninstall planning and application without rollback, backup restore,
-directory pruning, or forceful deletion.
+Keep install lifecycle behavior safe and dry-run-first while continuing to
+sharpen the core seams behind the CLI adapter.
 
 The safety invariant remains: ThreadKit must not mutate unmarked foreign files.
-Uninstall also skips drifted generated files whose current hash no longer
-matches the manifest.
+Uninstall skips drifted generated files whose current hash no longer matches the
+manifest. Rollback restores only from backup paths proven to be inside
+`<baseDir>/.threadkit/backups/`, with force rollback limited to drifted managed
+files.
 
 ## Known gaps (intentionally deferred)
 
 Orphan backup directories — directories written to `<baseDir>/.threadkit/backups/`
 during a failed install before the index is updated — are not detected or cleaned up.
 They must be removed manually.
+
+Full install lifecycle extraction from `src/cli/commands.ts` is deferred until
+there is a second adapter or a smaller orchestration interface worth extracting.
 
 ## Local Environment
 
