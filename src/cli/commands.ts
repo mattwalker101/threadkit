@@ -101,6 +101,7 @@ export interface BackupPruneOptions {
   scope?: string;
   format?: string;
   keep?: string;
+  orphans?: boolean;
   apply?: boolean;
 }
 
@@ -580,7 +581,8 @@ export async function runBackupPrune(
       baseDir: resolvedInstall.baseDir,
       target: resolvedInstall.target,
       scope: resolvedInstall.scope,
-      keep
+      keep,
+      includeOrphans: options.orphans === true
     });
 
     if (options.apply !== true) {

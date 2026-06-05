@@ -51,6 +51,10 @@ function generationListText(generations: Array<{ action: string; id: string; bac
   return generations.map((generation) => `${generation.action}\t${generation.id}\t${generation.backupDir}\n`).join("");
 }
 
+function orphanListText(orphans: Array<{ action: string; path: string }>): string {
+  return orphans.map((orphan) => `orphan\t${orphan.action}\t${orphan.path}\n`).join("");
+}
+
 function toSkillJson(skill: LoadedSkill) {
   return {
     id: skill.id,
@@ -422,12 +426,13 @@ export function formatBackupPruneDryRun(format: OutputFormat, plan: BackupPruneP
       dryRun: true,
       keep: plan.keep,
       generations: plan.generations,
+      orphans: plan.orphans,
       retained: plan.retained,
       warnings: plan.warnings
     });
   }
 
-  return stdout(generationListText(plan.generations));
+  return stdout(`${generationListText(plan.generations)}${orphanListText(plan.orphans)}`);
 }
 
 export function formatBackupPruneApplied(
@@ -445,12 +450,13 @@ export function formatBackupPruneApplied(
       keep: plan.keep,
       indexPath: applied.indexPath,
       generations: applied.generations,
+      orphans: applied.orphans,
       retained: applied.retained,
       warnings: plan.warnings
     });
   }
 
-  return stdout(`${generationListText(applied.generations)}index\t${applied.indexPath}\n`);
+  return stdout(`${generationListText(applied.generations)}${orphanListText(applied.orphans)}index\t${applied.indexPath}\n`);
 }
 
 export function formatBackupPruneError(format: OutputFormat, target: string, error: CliError): CommandOutput {

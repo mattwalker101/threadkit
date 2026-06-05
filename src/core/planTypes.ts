@@ -158,6 +158,12 @@ export interface PlannedBackupPruneGeneration extends BackupGeneration {
   action: BackupPruneAction;
 }
 
+export interface PlannedBackupPruneOrphan {
+  path: string;
+  relPath: string;
+  action: BackupPruneAction;
+}
+
 export interface BackupPrunePlan {
   index: BackupIndex;
   baseDir: string;
@@ -166,6 +172,7 @@ export interface BackupPrunePlan {
   keep: number;
   dryRun: true;
   generations: PlannedBackupPruneGeneration[];
+  orphans: PlannedBackupPruneOrphan[];
   retained: BackupGeneration[];
   warnings: string[];
 }
@@ -174,9 +181,14 @@ export interface AppliedBackupPruneGeneration extends PlannedBackupPruneGenerati
   deleted: boolean;
 }
 
+export interface AppliedBackupPruneOrphan extends PlannedBackupPruneOrphan {
+  deleted: boolean;
+}
+
 export interface ApplyBackupPrunePlanResult {
   indexPath: string;
   generations: AppliedBackupPruneGeneration[];
+  orphans: AppliedBackupPruneOrphan[];
   retained: BackupGeneration[];
 }
 

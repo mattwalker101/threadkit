@@ -121,6 +121,7 @@ export function createProgram(context: CommandContext = defaultContext): Command
     .argument("<target>", "Install target.")
     .option("--scope <scope>", "Install scope: user or project.")
     .option("--keep <count>", "Number of newest generations to keep.", "10")
+    .option("--orphans", "Also prune unindexed direct child backup directories.")
     .option("--apply", "Apply the prune plan.")
     .option("--format <format>", "Output format: text or json.")
     .action((target, options) => runBackupPrune(target, options, context));

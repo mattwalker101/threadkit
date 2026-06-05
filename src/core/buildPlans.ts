@@ -1,5 +1,6 @@
+import { readdirSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { contentForSpec, resolveSafePathInside } from "./resolveSafePath.js";
 import type { RenderResult } from "./renderTypes.js";
 import { matchingBackupGenerations } from "./backupGenerations.js";
@@ -20,6 +21,7 @@ import {
   type InstallManifest,
   type InstallScope,
   type PlannedBackupPruneGeneration,
+  type PlannedBackupPruneOrphan,
   type PlannedFile,
   type PlannedRollbackFile,
   type PlannedUninstallDirectory,
@@ -336,12 +338,14 @@ export function buildBackupPrunePlan(args: {
   target: string;
   scope: InstallScope;
   keep?: number;
+  includeOrphans?: boolean;
 }): BackupPrunePlan {
   const keep = args.keep ?? 10;
+  const baseDir = resolve(args.baseDir);
   const matching = matchingBackupGenerations(args.index, {
     target: args.target,
     scope: args.scope,
-    baseDir: args.baseDir
+    baseDir
   });
   const retained = matching.slice(0, keep);
   const retainedIds = new Set(retained.map((generation) => generation.id));
@@ -349,18 +353,54 @@ export function buildBackupPrunePlan(args: {
     .filter((generation) => !retainedIds.has(generation.id))
     .map((generation): PlannedBackupPruneGeneration => ({
       ...generation,
-      action: isSafeBackupDir(args.baseDir, generation.backupDir) ? "delete" : "unsafe-backup-dir"
+      action: isSafeBackupDir(baseDir, generation.backupDir) ? "delete" : "unsafe-backup-dir"
     }));
+  const orphans = args.includeOrphans === true ? planOrphanBackupDirs(args.index, baseDir) : [];
 
   return {
     index: args.index,
-    baseDir: resolve(args.baseDir),
+    baseDir,
     target: args.target,
     scope: args.scope,
     keep,
     dryRun: true,
     generations,
+    orphans,
     retained,
     warnings: []
   };
+}
+
+function planOrphanBackupDirs(index: BackupIndex, baseDir: string): PlannedBackupPruneOrphan[] {
+  const backupRoot = join(baseDir, ".threadkit", "backups");
+  let entries;
+
+  try {
+    entries = readdirSync(backupRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return [];
+    }
+
+    throw error;
+  }
+
+  const referenced = new Set(
+    index.generations
+      .filter((generation) => isSafeBackupDir(baseDir, generation.backupDir))
+      .map((generation) => resolve(generation.backupDir))
+  );
+
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry): PlannedBackupPruneOrphan => {
+      const path = resolve(backupRoot, entry.name);
+
+      return {
+        path,
+        relPath: relative(backupRoot, path),
+        action: isSafeBackupDir(baseDir, path) ? "delete" : "unsafe-backup-dir"
+      };
+    })
+    .filter((orphan) => !referenced.has(orphan.path));
 }

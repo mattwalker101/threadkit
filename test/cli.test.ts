@@ -2009,6 +2009,97 @@ describe("threadkit CLI", () => {
     });
   });
 
+  it("dry-runs orphan backup pruning without deleting orphan directories", async () => {
+    const cwd = await makeTempRoot();
+    const baseDir = join(cwd, ".claude", "skills");
+    const orphanDir = join(baseDir, ".threadkit", "backups", "orphan");
+    await mkdir(orphanDir, { recursive: true });
+    await writeFile(join(orphanDir, "old.md"), "old\n");
+    await writeFile(join(baseDir, ".threadkit", "backup-index.json"), '{"schemaVersion":1,"generations":[]}\n');
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "backups",
+      "prune",
+      "claude",
+      "--scope",
+      "project",
+      "--orphans",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(join(orphanDir, "old.md"), "utf8")).toBe("old\n");
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: true,
+      dryRun: true,
+      generations: [],
+      orphans: [{ path: orphanDir, relPath: "orphan", action: "delete" }]
+    });
+  });
+
+  it("applies orphan backup pruning and reports deleted orphans", async () => {
+    const cwd = await makeTempRoot();
+    const baseDir = join(cwd, ".claude", "skills");
+    const orphanDir = join(baseDir, ".threadkit", "backups", "orphan");
+    await mkdir(orphanDir, { recursive: true });
+    await writeFile(join(orphanDir, "old.md"), "old\n");
+    await writeFile(join(baseDir, ".threadkit", "backup-index.json"), '{"schemaVersion":1,"generations":[]}\n');
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "backups",
+      "prune",
+      "claude",
+      "--scope",
+      "project",
+      "--orphans",
+      "--apply",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    await expect(stat(orphanDir)).rejects.toThrow();
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: true,
+      dryRun: false,
+      generations: [],
+      orphans: [{ path: orphanDir, relPath: "orphan", action: "delete", deleted: true }]
+    });
+  });
+
+  it("prints orphan backup pruning rows in text output", async () => {
+    const cwd = await makeTempRoot();
+    const baseDir = join(cwd, ".claude", "skills");
+    const orphanDir = join(baseDir, ".threadkit", "backups", "orphan");
+    await mkdir(orphanDir, { recursive: true });
+    await writeFile(join(baseDir, ".threadkit", "backup-index.json"), '{"schemaVersion":1,"generations":[]}\n');
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "backups",
+      "prune",
+      "claude",
+      "--scope",
+      "project",
+      "--orphans"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(harness.stdout).toBe(`orphan\tdelete\t${orphanDir}\n`);
+  });
+
   it("rolls back a named backup generation", async () => {
     const cwd = await makeTempRoot();
     const baseDir = join(cwd, ".claude", "skills");
