@@ -2,24 +2,15 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   auditLibrary,
-  applyInstallPlan,
-  applyBackupPrunePlan,
-  applyRollbackPlan,
-  applyUninstallPlan,
-  backupGenerationToRollbackManifest,
-  buildBackupPrunePlan,
-  buildPlan,
-  buildRollbackPlan,
-  buildUninstallPlan,
   getExportTarget,
   getRenderer,
-  findBackupGeneration,
   InstallPlanUsageError,
-  loadBackupIndex,
-  loadInstallManifest,
   loadLibrary,
-  matchingBackupGenerations,
-  resolveInstallBaseDir,
+  listBackupGenerationsOperation,
+  planOrApplyBackupPruneOperation,
+  planOrApplyInstallOperation,
+  planOrApplyRollbackOperation,
+  planOrApplyUninstallOperation,
   resolveProfile,
   writeExportFiles
 } from "../core/index.js";
@@ -330,63 +321,25 @@ export async function runInstall(
   const profileName = options.profile;
 
   try {
-    if (!profileName) {
-      throw new CliUsageError("missing-profile", "Install requires --profile <name>.");
-    }
-
-    const resolvedInstall = resolveInstallBaseDir({
+    const result = await planOrApplyInstallOperation({
       targetName,
-      scope: options.scope,
+      profileName,
+      root,
       cwd: context.cwd,
+      scope: options.scope,
+      apply: options.apply === true,
+      force: options.force === true,
       env: process.env
     });
-    const target = getExportTarget(targetName);
 
-    if (!target) {
-      throw new CliUsageError("unsupported-target", `Install target '${targetName}' is not supported.`);
-    }
-
-    const library = await loadLibrary(root);
-    const profile = library.profiles.find((candidate) => candidate.name === profileName);
-
-    if (!profile) {
-      throw new CliUsageError("unknown-profile", `Profile '${profileName}' was not found.`);
-    }
-
-    const resolved = resolveProfile({ profile, skills: library.skills });
-    const renderer = getRenderer(target.format);
-
-    if (!renderer) {
-      throw new CliUsageError("unsupported-format", `Export format '${target.format}' is not supported.`);
-    }
-
-    const render = renderer.render({
-      profile: profileName,
-      target: target.name,
-      scope: resolvedInstall.scope,
-      skills: resolved.skills
-    });
-    const plan = await buildPlan({
-      target: target.name,
-      profile: profileName,
-      scope: resolvedInstall.scope,
-      baseDir: resolvedInstall.baseDir,
-      render,
-      managedOnly: true,
-      forceForeign: options.force === true
-    });
-    const hasForeignFiles = plan.files.some((file) => file.action === "skip-foreign");
-
-    if (options.apply !== true || hasForeignFiles) {
-      context.setExitCode(hasForeignFiles ? 1 : 0);
-      emit(context, formatInstallDryRun(format, root, plan));
+    if (result.kind === "dry-run") {
+      context.setExitCode(result.hasForeignFiles ? 1 : 0);
+      emit(context, formatInstallDryRun(format, root, result.plan));
       return;
     }
 
-    const applied = await applyInstallPlan({ plan, render });
-
     context.setExitCode(0);
-    emit(context, formatInstallApplied(format, root, plan, applied));
+    emit(context, formatInstallApplied(format, root, result.plan, result.applied));
   } catch (error) {
     context.setExitCode(isUsageError(error) ? 2 : 1);
     emit(
@@ -406,31 +359,23 @@ export async function runUninstall(
   const format = getFormat(options.format);
 
   try {
-    const resolvedInstall = resolveInstallBaseDir({
+    const result = await planOrApplyUninstallOperation({
       targetName,
-      scope: options.scope,
       cwd: context.cwd,
+      scope: options.scope,
+      apply: options.apply === true,
+      pruneEmptyDirs: options.pruneEmptyDirs === true,
       env: process.env
     });
-    const manifest = await loadInstallManifest({ baseDir: resolvedInstall.baseDir });
-    const plan = await buildUninstallPlan({
-      manifest,
-      target: resolvedInstall.target,
-      scope: resolvedInstall.scope,
-      baseDir: resolvedInstall.baseDir,
-      pruneEmptyDirs: options.pruneEmptyDirs === true
-    });
 
-    if (options.apply !== true) {
+    if (result.kind === "dry-run") {
       context.setExitCode(0);
-      emit(context, formatUninstallDryRun(format, plan, options.pruneEmptyDirs === true));
+      emit(context, formatUninstallDryRun(format, result.plan, options.pruneEmptyDirs === true));
       return;
     }
 
-    const applied = await applyUninstallPlan({ plan });
-
     context.setExitCode(0);
-    emit(context, formatUninstallApplied(format, plan, applied, options.pruneEmptyDirs === true));
+    emit(context, formatUninstallApplied(format, result.plan, result.applied, options.pruneEmptyDirs === true));
   } catch (error) {
     context.setExitCode(isUsageError(error) ? 2 : 1);
     emit(context, formatUninstallError(format, targetName, normalizeError(error)));
@@ -447,57 +392,39 @@ export async function runRollback(
   const format = getFormat(options.format);
 
   try {
-    const resolvedInstall = resolveInstallBaseDir({
+    const result = await planOrApplyRollbackOperation({
       targetName,
-      scope: options.scope,
       cwd: context.cwd,
+      scope: options.scope,
+      force: options.force === true,
+      apply: options.apply === true,
+      generation: options.generation,
       env: process.env
     });
-    let manifest;
 
-    if (options.generation === undefined) {
-      manifest = await loadInstallManifest({ baseDir: resolvedInstall.baseDir });
-    } else {
-      const index = await loadBackupIndex({ baseDir: resolvedInstall.baseDir });
-      const generation = findBackupGeneration(index, resolvedInstall, options.generation);
-
-      if (!generation) {
-        throw new InstallPlanUsageError(
-          "missing-backup-generation",
-          `Backup generation '${options.generation}' was not found.`
-        );
-      }
-
-      manifest = backupGenerationToRollbackManifest(generation);
-    }
-
-    const plan = await buildRollbackPlan({
-      manifest,
-      target: resolvedInstall.target,
-      scope: resolvedInstall.scope,
-      baseDir: resolvedInstall.baseDir,
-      force: options.force === true
-    });
-
-    if (options.apply !== true) {
+    if (result.kind === "dry-run") {
       context.setExitCode(0);
       emit(
         context,
-        formatRollbackDryRun({ format, plan, force: options.force === true, generation: options.generation })
+        formatRollbackDryRun({
+          format,
+          plan: result.plan,
+          force: options.force === true,
+          generation: options.generation
+        })
       );
       return;
     }
 
-    const applied = await applyRollbackPlan({ plan, force: options.force === true });
-    const restored = applied.files.filter((file) => file.restored).length;
+    const restored = result.applied.files.filter((file) => file.restored).length;
 
     context.setExitCode(0);
     emit(
       context,
       formatRollbackApplied({
         format,
-        plan,
-        applied,
+        plan: result.plan,
+        applied: result.applied,
         force: options.force === true,
         generation: options.generation,
         restored
@@ -519,24 +446,22 @@ export async function runBackupList(
   const format = getFormat(options.format);
 
   try {
-    const resolvedInstall = resolveInstallBaseDir({
+    const result = await listBackupGenerationsOperation({
       targetName,
-      scope: options.scope,
       cwd: context.cwd,
+      scope: options.scope,
       env: process.env
     });
-    const index = await loadBackupIndex({ baseDir: resolvedInstall.baseDir });
-    const generations = matchingBackupGenerations(index, resolvedInstall);
 
     context.setExitCode(0);
     emit(
       context,
       formatBackupListSuccess({
         format,
-        target: resolvedInstall.target,
-        scope: resolvedInstall.scope,
-        baseDir: resolvedInstall.baseDir,
-        generations
+        target: result.target,
+        scope: result.scope,
+        baseDir: result.baseDir,
+        generations: result.generations
       })
     );
   } catch (error) {
@@ -569,32 +494,24 @@ export async function runBackupPrune(
 
   try {
     const keep = parseKeep(options.keep);
-    const resolvedInstall = resolveInstallBaseDir({
+    const result = await planOrApplyBackupPruneOperation({
       targetName,
-      scope: options.scope,
       cwd: context.cwd,
+      scope: options.scope,
+      keep,
+      includeOrphans: options.orphans === true,
+      apply: options.apply === true,
       env: process.env
     });
-    const index = await loadBackupIndex({ baseDir: resolvedInstall.baseDir });
-    const plan = buildBackupPrunePlan({
-      index,
-      baseDir: resolvedInstall.baseDir,
-      target: resolvedInstall.target,
-      scope: resolvedInstall.scope,
-      keep,
-      includeOrphans: options.orphans === true
-    });
 
-    if (options.apply !== true) {
+    if (result.kind === "dry-run") {
       context.setExitCode(0);
-      emit(context, formatBackupPruneDryRun(format, plan));
+      emit(context, formatBackupPruneDryRun(format, result.plan));
       return;
     }
 
-    const applied = await applyBackupPrunePlan({ plan });
-
     context.setExitCode(0);
-    emit(context, formatBackupPruneApplied(format, plan, applied));
+    emit(context, formatBackupPruneApplied(format, result.plan, result.applied));
   } catch (error) {
     context.setExitCode(isUsageError(error) ? 2 : 1);
     emit(context, formatBackupPruneError(format, targetName, normalizeError(error)));

@@ -12,3 +12,4 @@ export * from "./renderers.js";
 export * from "./writeExportFiles.js";
 export * from "./exportTargets.js";
 export * from "./installPlan.js";
+export * from "./lifecycleOperations.js";
