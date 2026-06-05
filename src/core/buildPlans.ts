@@ -2,12 +2,12 @@ import { readFile, readdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { contentForSpec, resolveSafePathInside } from "./resolveSafePath.js";
 import type { RenderResult } from "./renderTypes.js";
-import { hasManagedMarker } from "./marker.js";
+import { matchingBackupGenerations } from "./backupGenerations.js";
 import {
   currentRollbackState,
   isSafeBackupDir,
   manifestPathForBaseDir,
-  newestGenerationsFirst,
+  readCurrentManagedFileState,
   resolveBackupPath,
   sha256,
   stripTargetPrefix
@@ -161,19 +161,17 @@ export async function buildPlan(args: {
     let action: InstallAction = "create";
     let existingIsForeign = false;
 
-    try {
-      const existing = await readFile(outputPath);
-      if (args.managedOnly && !hasManagedMarker(existing)) {
-        action = args.forceForeign === true ? "overwrite-foreign" : "skip-foreign";
-        existingIsForeign = true;
-      } else {
-        action = sha256(existing) === plannedHash ? "unchanged" : "overwrite";
-      }
-    } catch (error) {
-      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
-      if (code !== "ENOENT") {
-        throw error;
-      }
+    const current = await readCurrentManagedFileState({
+      path: outputPath,
+      fallbackMarker: file.marker,
+      fallbackSha256: plannedHash
+    });
+
+    if (current.kind === "present" && args.managedOnly && !current.marker) {
+      action = args.forceForeign === true ? "overwrite-foreign" : "skip-foreign";
+      existingIsForeign = true;
+    } else if (current.kind === "present") {
+      action = current.sha256 === plannedHash ? "unchanged" : "overwrite";
     }
 
     files.push({
@@ -213,23 +211,20 @@ export async function buildUninstallPlan(args: {
     let marker = file.marker;
     let currentHash = file.sha256;
 
-    try {
-      const existing = await readFile(outputPath);
-      marker = hasManagedMarker(existing);
-      currentHash = sha256(existing);
+    const current = await readCurrentManagedFileState({
+      path: outputPath,
+      fallbackMarker: file.marker,
+      fallbackSha256: file.sha256
+    });
+    marker = current.marker;
+    currentHash = current.sha256;
 
-      if (!marker) {
-        action = "skip-foreign";
-      } else if (currentHash !== file.sha256) {
-        action = "skip-drifted";
-      }
-    } catch (error) {
-      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
-      if (code !== "ENOENT") {
-        throw error;
-      }
-
+    if (current.kind === "missing") {
       action = "missing";
+    } else if (!marker) {
+      action = "skip-foreign";
+    } else if (currentHash !== file.sha256) {
+      action = "skip-drifted";
     }
 
     files.push({
@@ -343,14 +338,11 @@ export function buildBackupPrunePlan(args: {
   keep?: number;
 }): BackupPrunePlan {
   const keep = args.keep ?? 10;
-  const matching = newestGenerationsFirst(
-    args.index.generations.filter(
-      (generation) =>
-        generation.target === args.target &&
-        generation.scope === args.scope &&
-        resolve(generation.baseDir) === resolve(args.baseDir)
-    )
-  );
+  const matching = matchingBackupGenerations(args.index, {
+    target: args.target,
+    scope: args.scope,
+    baseDir: args.baseDir
+  });
   const retained = matching.slice(0, keep);
   const retainedIds = new Set(retained.map((generation) => generation.id));
   const generations = matching

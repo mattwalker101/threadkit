@@ -13,10 +13,12 @@ import {
   buildUninstallPlan,
   getExportTarget,
   getRenderer,
+  findBackupGeneration,
   InstallPlanUsageError,
   loadBackupIndex,
   loadInstallManifest,
   loadLibrary,
+  matchingBackupGenerations,
   resolveInstallBaseDir,
   resolveProfile,
   writeExportFiles
@@ -456,13 +458,7 @@ export async function runRollback(
       manifest = await loadInstallManifest({ baseDir: resolvedInstall.baseDir });
     } else {
       const index = await loadBackupIndex({ baseDir: resolvedInstall.baseDir });
-      const generation = index.generations.find(
-        (candidate) =>
-          candidate.id === options.generation &&
-          candidate.target === resolvedInstall.target &&
-          candidate.scope === resolvedInstall.scope &&
-          resolve(candidate.baseDir) === resolve(resolvedInstall.baseDir)
-      );
+      const generation = findBackupGeneration(index, resolvedInstall, options.generation);
 
       if (!generation) {
         throw new InstallPlanUsageError(
@@ -529,12 +525,7 @@ export async function runBackupList(
       env: process.env
     });
     const index = await loadBackupIndex({ baseDir: resolvedInstall.baseDir });
-    const generations = index.generations.filter(
-      (generation) =>
-        generation.target === resolvedInstall.target &&
-        generation.scope === resolvedInstall.scope &&
-        resolve(generation.baseDir) === resolve(resolvedInstall.baseDir)
-    );
+    const generations = matchingBackupGenerations(index, resolvedInstall);
 
     context.setExitCode(0);
     emit(

@@ -14,9 +14,13 @@ import {
   applyRollbackPlan,
   backupGenerationToRollbackManifest,
   backupIndexPathForBaseDir,
+  backupGenerationMatchesInstall,
+  findBackupGeneration,
   InstallPlanUsageError,
   loadBackupIndex,
   loadInstallManifest,
+  matchingBackupGenerations,
+  readCurrentManagedFileState,
   resolveInstallBaseDir,
   writeBackupIndex,
   type InstallScope
@@ -711,6 +715,134 @@ describe("backup index loading", () => {
       "newer",
       "older"
     ]);
+  });
+});
+
+describe("backup generation matching", () => {
+  function generation(overrides: {
+    id: string;
+    target?: string;
+    scope?: InstallScope;
+    baseDir?: string;
+    installedAt?: string;
+  }) {
+    const baseDir = overrides.baseDir ?? "/tmp/threadkit";
+
+    return {
+      id: overrides.id,
+      target: overrides.target ?? "claude",
+      profile: "minimal",
+      scope: overrides.scope ?? ("user" satisfies InstallScope),
+      baseDir,
+      installedAt: overrides.installedAt ?? "2026-06-01T10-00-00-000Z",
+      backupDir: join(baseDir, ".threadkit", "backups", overrides.id),
+      files: []
+    };
+  }
+
+  it("matches generations with the same target, scope, and resolved base directory", () => {
+    expect(
+      backupGenerationMatchesInstall(generation({ id: "same", baseDir: "/tmp/threadkit/child/.." }), {
+        target: "claude",
+        scope: "user",
+        baseDir: "/tmp/threadkit"
+      })
+    ).toBe(true);
+  });
+
+  it("excludes generations with a different target, scope, or base directory", () => {
+    const install = { target: "claude", scope: "user" satisfies InstallScope, baseDir: "/tmp/threadkit" };
+
+    expect(backupGenerationMatchesInstall(generation({ id: "wrong-target", target: "opencode" }), install)).toBe(
+      false
+    );
+    expect(backupGenerationMatchesInstall(generation({ id: "wrong-scope", scope: "project" }), install)).toBe(
+      false
+    );
+    expect(
+      backupGenerationMatchesInstall(generation({ id: "wrong-base-dir", baseDir: "/tmp/other" }), install)
+    ).toBe(false);
+  });
+
+  it("returns matching generations newest first", () => {
+    const index = {
+      schemaVersion: 1 as const,
+      generations: [
+        generation({ id: "older", installedAt: "2026-06-01T10-00-00-000Z" }),
+        generation({ id: "wrong-target", target: "opencode", installedAt: "2026-06-01T12-00-00-000Z" }),
+        generation({ id: "newer", installedAt: "2026-06-01T11-00-00-000Z" })
+      ]
+    };
+
+    expect(
+      matchingBackupGenerations(index, { target: "claude", scope: "user", baseDir: "/tmp/threadkit" }).map(
+        (matching) => matching.id
+      )
+    ).toEqual(["newer", "older"]);
+  });
+
+  it("finds a matching generation by id and returns undefined for a missing id", () => {
+    const index = {
+      schemaVersion: 1 as const,
+      generations: [generation({ id: "gen-1" })]
+    };
+    const install = { target: "claude", scope: "user" satisfies InstallScope, baseDir: "/tmp/threadkit" };
+
+    expect(findBackupGeneration(index, install, "gen-1")?.id).toBe("gen-1");
+    expect(findBackupGeneration(index, install, "missing")).toBeUndefined();
+  });
+});
+
+describe("managed file state", () => {
+  it("returns marker, hash, and content for a present managed file", async () => {
+    const baseDir = await makeTempRoot();
+    const path = join(baseDir, "managed.md");
+    const content = "<!-- threadkit:generated target=claude -->\nManaged\n";
+    await writeFile(path, content);
+
+    const state = await readCurrentManagedFileState({
+      path,
+      fallbackMarker: false,
+      fallbackSha256: "fallback"
+    });
+
+    expect(state).toMatchObject({
+      kind: "present",
+      marker: true,
+      sha256: sha256(content)
+    });
+    expect(state.kind === "present" ? state.content.toString("utf8") : undefined).toBe(content);
+  });
+
+  it("returns marker false for a present foreign file", async () => {
+    const baseDir = await makeTempRoot();
+    const path = join(baseDir, "foreign.md");
+    const content = "Human file\n";
+    await writeFile(path, content);
+
+    await expect(
+      readCurrentManagedFileState({ path, fallbackMarker: true, fallbackSha256: "fallback" })
+    ).resolves.toMatchObject({
+      kind: "present",
+      marker: false,
+      sha256: sha256(content)
+    });
+  });
+
+  it("returns fallback marker and hash for a missing file", async () => {
+    const baseDir = await makeTempRoot();
+
+    await expect(
+      readCurrentManagedFileState({
+        path: join(baseDir, "missing.md"),
+        fallbackMarker: true,
+        fallbackSha256: "fallback"
+      })
+    ).resolves.toEqual({
+      kind: "missing",
+      marker: true,
+      sha256: "fallback"
+    });
   });
 });
 
