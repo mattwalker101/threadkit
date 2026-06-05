@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { homedir as defaultHomedir } from "node:os";
 import { dirname, join, isAbsolute, resolve } from "node:path";
 import { getExportTarget } from "./exportTargets.js";
+import { hasManagedMarker } from "./marker.js";
 import { isInsideDirectory } from "./resolveSafePath.js";
 import type { ExportScope, FileSpec } from "./renderTypes.js";
 
@@ -282,12 +283,6 @@ export function backupIndexPathForBaseDir(baseDir: string): string {
 
 export function sha256(content: Buffer | string): string {
   return createHash("sha256").update(content).digest("hex");
-}
-
-export function hasManagedMarker(content: Buffer): boolean {
-  const text = content.toString("utf8");
-  const firstLines = text.split(/\r?\n/, 15);
-  return firstLines.some((line) => /\bthreadkit:generated\b/.test(line));
 }
 
 export function resolveBackupPath(baseDir: string, backupPath: string): string | undefined {

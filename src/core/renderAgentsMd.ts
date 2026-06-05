@@ -1,3 +1,5 @@
+import { enabledSkills } from "./renderHelpers.js";
+import { MANAGED_MARKER_TOKEN } from "./marker.js";
 import type { RenderInput, RenderResult, Renderer } from "./renderTypes.js";
 
 function renderSkillSection(skill: RenderInput["skills"][number]): string {
@@ -7,10 +9,8 @@ function renderSkillSection(skill: RenderInput["skills"][number]): string {
 }
 
 export function renderAgentsMd(input: RenderInput): RenderResult {
-  const marker = `<!-- threadkit:generated target=${input.target} profile=${input.profile} -->`;
-  const sections = input.skills
-    .filter((skill) => skill.metadata.targets.codex?.enabled === true)
-    .map((skill) => renderSkillSection(skill));
+  const marker = `<!-- ${MANAGED_MARKER_TOKEN} target=${input.target} profile=${input.profile} -->`;
+  const sections = enabledSkills(input.skills, "codex").map(renderSkillSection);
   const content = [`# ${input.profile}`, "", marker, "", ...sections].join("\n").trimEnd() + "\n";
 
   return {

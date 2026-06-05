@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { MANAGED_MARKER_REGEX } from "./marker.js";
 import type { LoadedLibrary } from "./loadLibrary.js";
 import type { LoadedSkill } from "./loadSkill.js";
 
@@ -101,6 +102,14 @@ async function auditSkill(skill: LoadedSkill): Promise<AuditWarning[]> {
     warnings.push({
       code: "safety-file-writes-mismatch",
       message: `Skill '${skill.id}' mentions file-write behavior but safety.allow_file_writes is false.`,
+      skill: skill.id
+    });
+  }
+
+  if (MANAGED_MARKER_REGEX.test(body)) {
+    warnings.push({
+      code: "marker-in-source",
+      message: `Skill '${skill.id}' body contains the threadkit:generated marker. This string belongs only in rendered output, not source.`,
       skill: skill.id
     });
   }

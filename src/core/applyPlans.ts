@@ -2,10 +2,10 @@ import { mkdir, readFile, rm, rmdir, unlink, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path";
 import { contentForSpec, resolveSafePathInside } from "./resolveSafePath.js";
 import type { RenderResult, FileSpec } from "./renderTypes.js";
+import { hasManagedMarker } from "./marker.js";
 import {
   InstallPlanUsageError,
   currentRollbackState,
-  hasManagedMarker,
   isSafeBackupDir,
   loadBackupIndex,
   manifestPathForBaseDir,
