@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir as defaultHomedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { getExportTarget } from "./exportTargets.js";
 import { hasManagedMarker } from "./marker.js";
 import { isInsideDirectory } from "./resolveSafePath.js";
@@ -67,10 +67,14 @@ export function resolveInstallBaseDir(args: ResolveInstallBaseDirArgs): Resolved
     );
   }
 
+  const resolvedPath = resolveInstallPath(pathValue, args.cwd, args.homedir ?? defaultHomedir());
+  const installKind = target.install?.kind ?? "directory";
+
   return {
     target: target.name,
     scope,
-    baseDir: resolveInstallPath(pathValue, args.cwd, args.homedir ?? defaultHomedir())
+    baseDir: installKind === "file" ? dirname(resolvedPath) : resolvedPath,
+    installKind
   };
 }
 

@@ -282,13 +282,15 @@ export function formatUninstallDryRun(
       dryRun: true,
       pruneEmptyDirs,
       manifestPath: plan.manifestPath,
+      manifest: plan.manifest,
       files: plan.files,
       directories: plan.directories,
       warnings: plan.warnings
     });
   }
 
-  return stdout(`${fileListText(plan.files)}${directoryListText(plan.directories)}`);
+  const manifestText = plan.manifest.action === "delete" ? `delete\t${plan.manifest.path}\n` : "";
+  return stdout(`${fileListText(plan.files)}${manifestText}${directoryListText(plan.directories)}`);
 }
 
 export function formatUninstallApplied(
@@ -307,13 +309,18 @@ export function formatUninstallApplied(
       dryRun: false,
       pruneEmptyDirs,
       manifestPath: applied.manifestPath,
+      manifest: applied.manifest,
       files: applied.files,
       directories: applied.directories,
       warnings: plan.warnings
     });
   }
 
-  return stdout(`${fileListText(applied.files)}${directoryListText(applied.directories)}manifest\t${applied.manifestPath}\n`);
+  const manifestText =
+    applied.manifest.action === "delete"
+      ? `${applied.manifest.deleted ? "deleted" : "missing"}\t${applied.manifest.path}\n`
+      : "";
+  return stdout(`${fileListText(applied.files)}${manifestText}${directoryListText(applied.directories)}`);
 }
 
 export function formatUninstallError(format: OutputFormat, target: string, error: CliError): CommandOutput {

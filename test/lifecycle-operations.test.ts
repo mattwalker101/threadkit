@@ -74,16 +74,16 @@ describe("lifecycle operations", () => {
         target: "claude",
         profile: "minimal",
         scope: "project",
-        files: [{ action: "create", relPath: "skills/handoff/SKILL.md" }]
+        files: [{ action: "create", relPath: "handoff/SKILL.md" }]
       }
     });
-    await expect(stat(join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md"))).rejects.toThrow();
+    await expect(stat(join(cwd, ".claude", "skills", "handoff", "SKILL.md"))).rejects.toThrow();
   });
 
   it("applies an install operation", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     await writeValidLibrary(root);
 
     const result = await planOrApplyInstallOperation({
@@ -102,7 +102,7 @@ describe("lifecycle operations", () => {
       profile: "minimal",
       applied: {
         manifestPath: join(cwd, ".claude", "skills", ".threadkit", "install-manifest.json"),
-        files: [{ action: "create", relPath: "skills/handoff/SKILL.md" }]
+        files: [{ action: "create", relPath: "handoff/SKILL.md" }]
       }
     });
     expect(await readFile(outputPath, "utf8")).toContain(

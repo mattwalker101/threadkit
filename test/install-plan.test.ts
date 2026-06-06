@@ -1069,8 +1069,17 @@ describe("uninstall planning", () => {
         path: join(baseDir, "skills"),
         relPath: "skills",
         action: "prune"
+      },
+      {
+        path: join(baseDir, ".threadkit"),
+        relPath: ".threadkit",
+        action: "prune"
       }
     ]);
+    expect(plan.manifest).toEqual({
+      path: join(baseDir, ".threadkit", "install-manifest.json"),
+      action: "delete"
+    });
   });
 
   it("does not plan directory pruning when sibling files remain", async () => {
@@ -1087,7 +1096,13 @@ describe("uninstall planning", () => {
 
     const plan = await buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir, pruneEmptyDirs: true });
 
-    expect(plan.directories).toEqual([]);
+    expect(plan.directories).toEqual([
+      {
+        path: join(baseDir, ".threadkit"),
+        relPath: ".threadkit",
+        action: "prune"
+      }
+    ]);
   });
 });
 
@@ -1288,8 +1303,10 @@ describe("uninstall application", () => {
     await expect(stat(join(baseDir, "skills"))).rejects.toThrow();
     expect(result.directories).toMatchObject([
       { relPath: "skills/handoff", action: "prune", pruned: true },
-      { relPath: "skills", action: "prune", pruned: true }
+      { relPath: "skills", action: "prune", pruned: true },
+      { relPath: ".threadkit", action: "prune", pruned: true }
     ]);
+    expect(result.manifest).toMatchObject({ action: "delete", deleted: true });
   });
 
   it("does not prune a directory that became nonempty after planning", async () => {
@@ -1310,7 +1327,8 @@ describe("uninstall application", () => {
     expect(await readFile(latePath, "utf8")).toBe("Human file\n");
     expect(result.directories).toMatchObject([
       { relPath: "skills/handoff", action: "skip-nonempty", pruned: false },
-      { relPath: "skills", action: "skip-nonempty", pruned: false }
+      { relPath: "skills", action: "skip-nonempty", pruned: false },
+      { relPath: ".threadkit", action: "prune", pruned: true }
     ]);
   });
 });
@@ -2059,7 +2077,8 @@ describe("install destination resolution", () => {
     expect(baseDir).toEqual({
       target: "claude",
       scope: "user" satisfies InstallScope,
-      baseDir: "/home/test/.claude/skills"
+      baseDir: "/home/test/.claude/skills",
+      installKind: "directory"
     });
   });
 
@@ -2069,7 +2088,25 @@ describe("install destination resolution", () => {
     expect(baseDir).toEqual({
       target: "opencode",
       scope: "project",
-      baseDir: "/repo/.opencode/command"
+      baseDir: "/repo/.opencode/command",
+      installKind: "directory"
+    });
+  });
+
+  it("uses the parent directory for single-file install targets", () => {
+    const baseDir = resolveInstallBaseDir({
+      targetName: "codex",
+      scope: "project",
+      cwd: "/repo",
+      env: {},
+      homedir: "/home/test"
+    });
+
+    expect(baseDir).toEqual({
+      target: "codex",
+      scope: "project",
+      baseDir: "/repo",
+      installKind: "file"
     });
   });
 

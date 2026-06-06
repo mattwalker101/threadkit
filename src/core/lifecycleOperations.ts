@@ -160,7 +160,8 @@ export async function planOrApplyInstallOperation(args: InstallOperationArgs): P
     baseDir: resolvedInstall.baseDir,
     render,
     managedOnly: true,
-    forceForeign: args.force
+    forceForeign: args.force,
+    stripRelPathPrefix: target.install?.stripRelPathPrefix
   });
   const hasForeignFiles = plan.files.some((file) => file.action === "skip-foreign");
 

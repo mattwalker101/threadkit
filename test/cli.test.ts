@@ -815,8 +815,8 @@ describe("threadkit CLI", () => {
       dryRun: true,
       files: [
         {
-          path: join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md"),
-          relPath: "skills/handoff/SKILL.md",
+          path: join(cwd, ".claude", "skills", "handoff", "SKILL.md"),
+          relPath: "handoff/SKILL.md",
           action: "create",
           marker: true,
           existingIsForeign: false,
@@ -828,13 +828,43 @@ describe("threadkit CLI", () => {
     await expect(stat(join(cwd, ".claude"))).rejects.toThrow();
   });
 
+  it("dry-runs an opencode install without duplicating the command directory", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "opencode",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(JSON.parse(harness.stdout).files[0]).toMatchObject({
+      path: join(cwd, ".opencode", "command", "handoff.md"),
+      relPath: "handoff.md",
+      action: "create"
+    });
+  });
+
   it("classifies pre-existing managed install files", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
     await writeValidCustomLibrary(root);
-    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await mkdir(join(cwd, ".claude", "skills", "handoff"), { recursive: true });
     await writeFile(
-      join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md"),
+      join(cwd, ".claude", "skills", "handoff", "SKILL.md"),
       "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nOld\n"
     );
     const harness = makeHarness(cwd);
@@ -856,7 +886,7 @@ describe("threadkit CLI", () => {
 
     expect(harness.exitCode).toBe(0);
     expect(JSON.parse(harness.stdout).files[0]).toMatchObject({
-      relPath: "skills/handoff/SKILL.md",
+      relPath: "handoff/SKILL.md",
       action: "overwrite",
       existingIsForeign: false
     });
@@ -884,7 +914,7 @@ describe("threadkit CLI", () => {
     expect(harness.stderr).toBe("");
     expect(harness.exitCode).toBe(0);
     expect(harness.stdout).toBe(
-      `create\t${join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md")}\n`
+      `create\t${join(cwd, ".claude", "skills", "handoff", "SKILL.md")}\n`
     );
   });
 
@@ -892,9 +922,9 @@ describe("threadkit CLI", () => {
   it("classifies pre-existing foreign install files, exits 1, and leaves them untouched", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
-    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await mkdir(join(cwd, ".claude", "skills", "handoff"), { recursive: true });
     await writeFile(outputPath, "Human file\n");
     const harness = makeHarness(cwd);
 
@@ -975,10 +1005,124 @@ describe("threadkit CLI", () => {
     });
   });
 
+  it("classifies an existing foreign codex AGENTS.md without treating it as a directory", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    await writeFile(join(cwd, "AGENTS.md"), "Human instructions\n");
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "codex",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(1);
+    expect(JSON.parse(harness.stdout)).toMatchObject({
+      ok: true,
+      target: "codex",
+      baseDir: cwd,
+      dryRun: true,
+      files: [
+        {
+          path: join(cwd, "AGENTS.md"),
+          relPath: "AGENTS.md",
+          action: "skip-foreign",
+          existingIsForeign: true
+        }
+      ]
+    });
+    expect(await readFile(join(cwd, "AGENTS.md"), "utf8")).toBe("Human instructions\n");
+  });
+
+  it("applies a codex project install to AGENTS.md", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "codex",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    const output = JSON.parse(harness.stdout);
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(await readFile(join(cwd, "AGENTS.md"), "utf8")).toContain(
+      "<!-- threadkit:generated target=codex profile=minimal -->"
+    );
+    expect(output).toMatchObject({
+      ok: true,
+      target: "codex",
+      baseDir: cwd,
+      dryRun: false,
+      manifestPath: join(cwd, ".threadkit", "install-manifest.json"),
+      files: [{ action: "create", relPath: "AGENTS.md" }]
+    });
+  });
+
+  it("applies forced codex foreign overwrites with backup metadata", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    await writeFile(join(cwd, "AGENTS.md"), "Human instructions\n");
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "codex",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--force",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+
+    const output = JSON.parse(harness.stdout);
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    expect(output.files[0]).toMatchObject({
+      relPath: "AGENTS.md",
+      action: "overwrite-foreign",
+      backupPath: expect.stringContaining(join(".threadkit", "backups"))
+    });
+    expect(await readFile(output.files[0].backupPath, "utf8")).toBe("Human instructions\n");
+  });
+
   it("applies a claude install, writes files, and reports manifest metadata", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
     const harness = makeHarness(cwd);
 
@@ -1011,22 +1155,22 @@ describe("threadkit CLI", () => {
       profile: "minimal",
       dryRun: false,
       manifestPath: join(cwd, ".claude", "skills", ".threadkit", "install-manifest.json"),
-      files: [{ action: "create", relPath: "skills/handoff/SKILL.md" }]
+      files: [{ action: "create", relPath: "handoff/SKILL.md" }]
     });
     expect(JSON.parse(await readFile(output.manifestPath, "utf8"))).toMatchObject({
       schemaVersion: 1,
       target: "claude",
       profile: "minimal",
-      files: [{ action: "create", relPath: "skills/handoff/SKILL.md" }]
+      files: [{ action: "create", relPath: "handoff/SKILL.md" }]
     });
   });
 
   it("refuses apply when foreign files are blocked and leaves them untouched", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
-    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await mkdir(join(cwd, ".claude", "skills", "handoff"), { recursive: true });
     await writeFile(outputPath, "Human file\n");
     const harness = makeHarness(cwd);
 
@@ -1060,9 +1204,9 @@ describe("threadkit CLI", () => {
   it("applies forced foreign overwrites with backups and manifest metadata", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
-    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await mkdir(join(cwd, ".claude", "skills", "handoff"), { recursive: true });
     await writeFile(outputPath, "Human file\n");
     const harness = makeHarness(cwd);
 
@@ -1093,7 +1237,7 @@ describe("threadkit CLI", () => {
       ok: true,
       dryRun: false,
       files: [{ action: "overwrite-foreign", existingIsForeign: true, backupPath: expect.any(String) }],
-      backups: [{ relPath: "skills/handoff/SKILL.md", backupPath: expect.any(String) }]
+      backups: [{ relPath: "handoff/SKILL.md", backupPath: expect.any(String) }]
     });
     expect(await readFile(output.backups[0].backupPath, "utf8")).toBe("Human file\n");
     expect(JSON.parse(await readFile(output.manifestPath, "utf8")).files[0]).toMatchObject({
@@ -1105,9 +1249,9 @@ describe("threadkit CLI", () => {
   it("previews forced foreign overwrites without applying them when force is used without apply", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
-    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await mkdir(join(cwd, ".claude", "skills", "handoff"), { recursive: true });
     await writeFile(outputPath, "Human file\n");
     const harness = makeHarness(cwd);
 
@@ -1140,7 +1284,7 @@ describe("threadkit CLI", () => {
   it("dry-runs uninstall from an install manifest as JSON", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
     const install = makeHarness(cwd);
     await install.program.parseAsync([
@@ -1185,10 +1329,14 @@ describe("threadkit CLI", () => {
       dryRun: true,
       pruneEmptyDirs: false,
       manifestPath: join(cwd, ".claude", "skills", ".threadkit", "install-manifest.json"),
+      manifest: {
+        path: join(cwd, ".claude", "skills", ".threadkit", "install-manifest.json"),
+        action: "keep"
+      },
       files: [
         {
           path: outputPath,
-          relPath: "skills/handoff/SKILL.md",
+          relPath: "handoff/SKILL.md",
           action: "delete",
           marker: true,
           sha256: expect.stringMatching(/^[a-f0-9]{64}$/)
@@ -1202,7 +1350,7 @@ describe("threadkit CLI", () => {
   it("applies uninstall and deletes unchanged managed files", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
     const install = makeHarness(cwd);
     await install.program.parseAsync([
@@ -1244,7 +1392,7 @@ describe("threadkit CLI", () => {
       scope: "project",
       dryRun: false,
       pruneEmptyDirs: false,
-      files: [{ action: "delete", relPath: "skills/handoff/SKILL.md", deleted: true }]
+      files: [{ action: "delete", relPath: "handoff/SKILL.md", deleted: true }]
     });
   });
 
@@ -1289,9 +1437,13 @@ describe("threadkit CLI", () => {
       dryRun: true,
       pruneEmptyDirs: true,
       directories: [
-        { relPath: "skills/handoff", action: "prune" },
-        { relPath: "skills", action: "prune" }
-      ]
+        { relPath: "handoff", action: "prune" },
+        { relPath: ".threadkit", action: "prune" }
+      ],
+      manifest: {
+        path: join(cwd, ".claude", "skills", ".threadkit", "install-manifest.json"),
+        action: "delete"
+      }
     });
   });
 
@@ -1332,16 +1484,104 @@ describe("threadkit CLI", () => {
 
     expect(harness.stderr).toBe("");
     expect(harness.exitCode).toBe(0);
-    await expect(stat(join(cwd, ".claude", "skills", "skills", "handoff"))).rejects.toThrow();
+    await expect(stat(join(cwd, ".claude", "skills", "handoff"))).rejects.toThrow();
     expect(JSON.parse(harness.stdout)).toMatchObject({
       ok: true,
       dryRun: false,
       pruneEmptyDirs: true,
       directories: [
-        { relPath: "skills/handoff", action: "prune", pruned: true },
-        { relPath: "skills", action: "prune", pruned: true }
-      ]
+        { relPath: "handoff", action: "prune", pruned: true },
+        { relPath: ".threadkit", action: "prune", pruned: true }
+      ],
+      manifest: {
+        path: join(cwd, ".claude", "skills", ".threadkit", "install-manifest.json"),
+        action: "delete",
+        deleted: true
+      }
     });
+  });
+
+  it("applies uninstall pruning and removes manifest metadata when all managed files are gone", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "claude",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "uninstall",
+      "claude",
+      "--scope",
+      "project",
+      "--apply",
+      "--prune-empty-dirs",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    await expect(stat(join(cwd, ".claude", "skills", ".threadkit", "install-manifest.json"))).rejects.toThrow();
+    await expect(stat(join(cwd, ".claude", "skills", ".threadkit"))).rejects.toThrow();
+    await expect(stat(join(cwd, ".claude", "skills", "handoff"))).rejects.toThrow();
+  });
+
+  it("uninstalls managed codex AGENTS.md and removes project manifest with pruning", async () => {
+    const root = await makeTempRoot();
+    const cwd = await makeTempRoot();
+    await writeValidCustomLibrary(root);
+    const install = makeHarness(cwd);
+    await install.program.parseAsync([
+      "node",
+      "threadkit",
+      "install",
+      "codex",
+      "--profile",
+      "minimal",
+      "--scope",
+      "project",
+      "--apply",
+      "--root",
+      root,
+      "--format",
+      "json"
+    ]);
+    const harness = makeHarness(cwd);
+
+    await harness.program.parseAsync([
+      "node",
+      "threadkit",
+      "uninstall",
+      "codex",
+      "--scope",
+      "project",
+      "--apply",
+      "--prune-empty-dirs",
+      "--format",
+      "json"
+    ]);
+
+    expect(harness.stderr).toBe("");
+    expect(harness.exitCode).toBe(0);
+    await expect(stat(join(cwd, "AGENTS.md"))).rejects.toThrow();
+    await expect(stat(join(cwd, ".threadkit", "install-manifest.json"))).rejects.toThrow();
   });
 
   it("reports a missing uninstall manifest as a JSON usage fault", async () => {
@@ -1414,7 +1654,7 @@ describe("threadkit CLI", () => {
   it("prints text uninstall plans as action and path rows", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
     const install = makeHarness(cwd);
     await install.program.parseAsync([
@@ -1444,7 +1684,7 @@ describe("threadkit CLI", () => {
   it("skips drifted managed files during apply uninstall", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
     const install = makeHarness(cwd);
     await install.program.parseAsync([
@@ -1486,14 +1726,14 @@ describe("threadkit CLI", () => {
     expect(JSON.parse(harness.stdout)).toMatchObject({
       ok: true,
       dryRun: false,
-      files: [{ action: "skip-drifted", relPath: "skills/handoff/SKILL.md", deleted: false }]
+      files: [{ action: "skip-drifted", relPath: "handoff/SKILL.md", deleted: false }]
     });
   });
 
   it("skips foreign files during apply uninstall", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
     const install = makeHarness(cwd);
     await install.program.parseAsync([
@@ -1532,17 +1772,17 @@ describe("threadkit CLI", () => {
     expect(JSON.parse(harness.stdout)).toMatchObject({
       ok: true,
       dryRun: false,
-      files: [{ action: "skip-foreign", relPath: "skills/handoff/SKILL.md", deleted: false }]
+      files: [{ action: "skip-foreign", relPath: "handoff/SKILL.md", deleted: false }]
     });
   });
 
   it("dry-runs rollback from an install manifest as JSON", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     const original = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nOld\n";
     await writeValidCustomLibrary(root);
-    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await mkdir(join(cwd, ".claude", "skills", "handoff"), { recursive: true });
     await writeFile(outputPath, original);
     const install = makeHarness(cwd);
     await install.program.parseAsync([
@@ -1587,7 +1827,7 @@ describe("threadkit CLI", () => {
       files: [
         {
           path: outputPath,
-          relPath: "skills/handoff/SKILL.md",
+          relPath: "handoff/SKILL.md",
           action: "restore",
           marker: true,
           sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
@@ -1601,9 +1841,9 @@ describe("threadkit CLI", () => {
   it("prints text rollback plans as action and path rows", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
-    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await mkdir(join(cwd, ".claude", "skills", "handoff"), { recursive: true });
     await writeFile(outputPath, "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nOld\n");
     const install = makeHarness(cwd);
     await install.program.parseAsync([
@@ -1633,10 +1873,10 @@ describe("threadkit CLI", () => {
   it("applies rollback and restores an overwritten managed file", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     const original = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nOld\n";
     await writeValidCustomLibrary(root);
-    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await mkdir(join(cwd, ".claude", "skills", "handoff"), { recursive: true });
     await writeFile(outputPath, original);
     const install = makeHarness(cwd);
     await install.program.parseAsync([
@@ -1676,16 +1916,16 @@ describe("threadkit CLI", () => {
       ok: true,
       dryRun: false,
       restored: 1,
-      files: [{ action: "restore", relPath: "skills/handoff/SKILL.md", restored: true }]
+      files: [{ action: "restore", relPath: "handoff/SKILL.md", restored: true }]
     });
   });
 
   it("rolls back a forced foreign overwrite only while generated content is unchanged", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
-    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await mkdir(join(cwd, ".claude", "skills", "handoff"), { recursive: true });
     await writeFile(outputPath, "Human file\n");
     const install = makeHarness(cwd);
     await install.program.parseAsync([
@@ -1759,9 +1999,9 @@ describe("threadkit CLI", () => {
   it("dry-runs force rollback for drifted managed files", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     await writeValidCustomLibrary(root);
-    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await mkdir(join(cwd, ".claude", "skills", "handoff"), { recursive: true });
     await writeFile(outputPath, "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nOld\n");
     const install = makeHarness(cwd);
     await install.program.parseAsync([
@@ -1800,17 +2040,17 @@ describe("threadkit CLI", () => {
       ok: true,
       dryRun: true,
       force: true,
-      files: [{ action: "force-restore", relPath: "skills/handoff/SKILL.md" }]
+      files: [{ action: "force-restore", relPath: "handoff/SKILL.md" }]
     });
   });
 
   it("applies force rollback for drifted managed files", async () => {
     const root = await makeTempRoot();
     const cwd = await makeTempRoot();
-    const outputPath = join(cwd, ".claude", "skills", "skills", "handoff", "SKILL.md");
+    const outputPath = join(cwd, ".claude", "skills", "handoff", "SKILL.md");
     const original = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nOld\n";
     await writeValidCustomLibrary(root);
-    await mkdir(join(cwd, ".claude", "skills", "skills", "handoff"), { recursive: true });
+    await mkdir(join(cwd, ".claude", "skills", "handoff"), { recursive: true });
     await writeFile(outputPath, original);
     const install = makeHarness(cwd);
     await install.program.parseAsync([
@@ -2103,12 +2343,12 @@ describe("threadkit CLI", () => {
   it("rolls back a named backup generation", async () => {
     const cwd = await makeTempRoot();
     const baseDir = join(cwd, ".claude", "skills");
-    const outputPath = join(baseDir, "skills", "handoff", "SKILL.md");
-    const backupPath = join(baseDir, ".threadkit", "backups", "first", "skills", "handoff", "SKILL.md");
+    const outputPath = join(baseDir, "handoff", "SKILL.md");
+    const backupPath = join(baseDir, ".threadkit", "backups", "first", "handoff", "SKILL.md");
     const current = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nGenerated\n";
     const original = "Original\n";
-    await mkdir(join(baseDir, "skills", "handoff"), { recursive: true });
-    await mkdir(join(baseDir, ".threadkit", "backups", "first", "skills", "handoff"), { recursive: true });
+    await mkdir(join(baseDir, "handoff"), { recursive: true });
+    await mkdir(join(baseDir, ".threadkit", "backups", "first", "handoff"), { recursive: true });
     await writeFile(outputPath, current);
     await writeFile(backupPath, original);
     await writeFile(
@@ -2128,7 +2368,7 @@ describe("threadkit CLI", () => {
               files: [
                 {
                   path: outputPath,
-                  relPath: "skills/handoff/SKILL.md",
+                  relPath: "handoff/SKILL.md",
                   action: "overwrite",
                   sha256: "84e47c01608cdc867baa40f3a57801aa8ebcc91c7353e239f79215187e55a2d1",
                   marker: true,
@@ -2165,7 +2405,7 @@ describe("threadkit CLI", () => {
       dryRun: true,
       generation: "first",
       manifestPath: join(baseDir, ".threadkit", "backup-index.json"),
-      files: [{ action: "restore", relPath: "skills/handoff/SKILL.md" }]
+      files: [{ action: "restore", relPath: "handoff/SKILL.md" }]
     });
 
     const apply = makeHarness(cwd);
