@@ -1,4 +1,4 @@
-import { enabledSkills } from "./renderHelpers.js";
+import { enabledSkills, renderSkillPayloadFiles } from "./renderHelpers.js";
 import { MANAGED_MARKER_TOKEN } from "./marker.js";
 import type { RenderInput, RenderResult, Renderer } from "./renderTypes.js";
 
@@ -13,6 +13,13 @@ export function renderAgentsMd(input: RenderInput): RenderResult {
   const sections = enabledSkills(input.skills, "codex").map(renderSkillSection);
   const content = [`# ${input.profile}`, "", marker, "", ...sections].join("\n").trimEnd() + "\n";
 
+  const payloadFiles = renderSkillPayloadFiles({
+    skills: input.skills,
+    targetKey: "codex",
+    relPathForPayload: ({ skill, payloadDir, payloadRelPath }) =>
+      `codex/skills/${skill.id}/${payloadDir}/${payloadRelPath}`
+  });
+
   return {
     format: "agents-md",
     files: [
@@ -20,7 +27,8 @@ export function renderAgentsMd(input: RenderInput): RenderResult {
         relPath: "codex/AGENTS.md",
         content,
         marker: true
-      }
+      },
+      ...payloadFiles
     ],
     warnings: []
   };

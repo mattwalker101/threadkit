@@ -1,9 +1,13 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { LoadedSkill } from "../src/core/index.js";
 import { renderOpenCodeCommand } from "../src/core/renderOpenCodeCommand.js";
 
 function skill(args: {
   id: string;
+  dir?: string;
   name?: string;
   summary?: string;
   body?: string;
@@ -12,7 +16,7 @@ function skill(args: {
 }): LoadedSkill {
   return {
     id: args.id,
-    dir: `/root/skills/${args.id}`,
+    dir: args.dir ?? join(process.cwd(), ".missing-test-skills", args.id),
     metadata: {
       id: args.id,
       name: args.name ?? args.id,
@@ -132,5 +136,29 @@ describe("opencode command renderer", () => {
         ""
       ].join("\n")
     );
+  });
+
+  it("includes payload files under command-name folders", async () => {
+    const root = await mkdtemp(join(tmpdir(), "threadkit-opencode-"));
+    const skillDir = join(root, "skills", "payload");
+    await mkdir(join(skillDir, "assets"), { recursive: true });
+    await writeFile(join(skillDir, "assets", "template.txt"), "asset\n");
+
+    const result = renderOpenCodeCommand({
+      profile: "minimal",
+      target: "opencode",
+      scope: "user",
+      skills: [skill({ id: "payload", dir: skillDir, commandName: "payload-command" })]
+    });
+
+    expect(result.files.map((file) => file.relPath)).toEqual([
+      "opencode/command/payload-command.md",
+      "opencode/command/payload-command/assets/template.txt"
+    ]);
+    expect(result.files[1]).toEqual({
+      relPath: "opencode/command/payload-command/assets/template.txt",
+      copySource: join(skillDir, "assets", "template.txt"),
+      marker: true
+    });
   });
 });

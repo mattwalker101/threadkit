@@ -1,7 +1,7 @@
 import { stringify } from "@iarna/toml";
-import { commandNameForSkill, enabledSkills } from "./renderHelpers.js";
+import { commandNameForSkill, enabledSkills, renderSkillPayloadFiles } from "./renderHelpers.js";
 import { MANAGED_MARKER_TOKEN } from "./marker.js";
-import type { RenderInput, RenderResult, Renderer } from "./renderTypes.js";
+import type { FileSpec, RenderInput, RenderResult, Renderer } from "./renderTypes.js";
 
 function renderCommandFile(input: RenderInput, skill: RenderInput["skills"][number]): string {
   const marker = `# ${MANAGED_MARKER_TOKEN} target=${input.target} profile=${input.profile} skill=${skill.id}`;
@@ -14,11 +14,19 @@ function renderCommandFile(input: RenderInput, skill: RenderInput["skills"][numb
 }
 
 export function renderGeminiToml(input: RenderInput): RenderResult {
-  const files = enabledSkills(input.skills, "gemini").map((skill) => ({
+  const files: FileSpec[] = enabledSkills(input.skills, "gemini").map((skill) => ({
       relPath: `gemini/commands/${commandNameForSkill(skill, "gemini")}.toml`,
       content: renderCommandFile(input, skill),
       marker: true
     }));
+  files.push(
+    ...renderSkillPayloadFiles({
+      skills: input.skills,
+      targetKey: "gemini",
+      relPathForPayload: ({ skill, payloadDir, payloadRelPath }) =>
+        `gemini/commands/${commandNameForSkill(skill, "gemini")}/${payloadDir}/${payloadRelPath}`
+    })
+  );
 
   return {
     format: "gemini-toml",

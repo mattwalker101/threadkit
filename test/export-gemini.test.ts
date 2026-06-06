@@ -1,10 +1,14 @@
 import { parse } from "@iarna/toml";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { LoadedSkill } from "../src/core/index.js";
 import { renderGeminiToml } from "../src/core/renderGeminiToml.js";
 
 function skill(args: {
   id: string;
+  dir?: string;
   name?: string;
   summary?: string;
   body?: string;
@@ -13,7 +17,7 @@ function skill(args: {
 }): LoadedSkill {
   return {
     id: args.id,
-    dir: `/root/skills/${args.id}`,
+    dir: args.dir ?? join(process.cwd(), ".missing-test-skills", args.id),
     metadata: {
       id: args.id,
       name: args.name ?? args.id,
@@ -156,6 +160,30 @@ describe("gemini toml renderer", () => {
         'Line with "quotes" and backslash \\',
         ""
       ].join("\n")
+    });
+  });
+
+  it("includes payload files under command-name folders", async () => {
+    const root = await mkdtemp(join(tmpdir(), "threadkit-gemini-"));
+    const skillDir = join(root, "skills", "payload");
+    await mkdir(join(skillDir, "scripts"), { recursive: true });
+    await writeFile(join(skillDir, "scripts", "run.sh"), "echo run\n");
+
+    const result = renderGeminiToml({
+      profile: "minimal",
+      target: "gemini",
+      scope: "user",
+      skills: [skill({ id: "payload", dir: skillDir, commandName: "payload-command" })]
+    });
+
+    expect(result.files.map((file) => file.relPath)).toEqual([
+      "gemini/commands/payload-command.toml",
+      "gemini/commands/payload-command/scripts/run.sh"
+    ]);
+    expect(result.files[1]).toEqual({
+      relPath: "gemini/commands/payload-command/scripts/run.sh",
+      copySource: join(skillDir, "scripts", "run.sh"),
+      marker: true
     });
   });
 });

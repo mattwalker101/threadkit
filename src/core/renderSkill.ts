@@ -1,4 +1,4 @@
-import { enabledSkills, type KnownTarget } from "./renderHelpers.js";
+import { enabledSkills, renderSkillPayloadFiles, type KnownTarget } from "./renderHelpers.js";
 import { MANAGED_MARKER_TOKEN } from "./marker.js";
 import type { RenderInput, RenderResult, Renderer } from "./renderTypes.js";
 
@@ -58,6 +58,15 @@ export function renderSkill(input: RenderInput): RenderResult {
       marker: true
     });
   }
+
+  files.push(
+    ...renderSkillPayloadFiles({
+      skills: input.skills,
+      targetKey,
+      relPathForPayload: ({ skill, payloadDir, payloadRelPath }) =>
+        `${input.target}/skills/${skill.id}/${payloadDir}/${payloadRelPath}`
+    })
+  );
 
   return {
     format: "skill",

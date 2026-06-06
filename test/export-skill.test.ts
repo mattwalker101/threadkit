@@ -1,9 +1,13 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { LoadedSkill } from "../src/core/index.js";
 import { renderSkill } from "../src/core/renderSkill.js";
 
 function skill(args: {
   id: string;
+  dir?: string;
   name?: string;
   summary?: string;
   body?: string;
@@ -13,7 +17,7 @@ function skill(args: {
 }): LoadedSkill {
   return {
     id: args.id,
-    dir: `/root/skills/${args.id}`,
+    dir: args.dir ?? join(process.cwd(), ".missing-test-skills", args.id),
     metadata: {
       id: args.id,
       name: args.name ?? args.id,
@@ -151,6 +155,51 @@ describe("skill renderer", () => {
     expect(descriptionLine).toBe(`description: ${"a".repeat(1021)}...`);
     expect(result.warnings).toEqual([
       "Skill 'verbose' description for target 'claude' exceeded 1024 characters and was truncated."
+    ]);
+  });
+
+  it("includes payload files next to Claude and Antigravity skill files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "threadkit-render-skill-"));
+    const skillDir = join(root, "skills", "payload");
+    await mkdir(join(skillDir, "assets", "nested"), { recursive: true });
+    await mkdir(join(skillDir, "scripts"), { recursive: true });
+    await writeFile(join(skillDir, "assets", "nested", "template.txt"), "asset\n");
+    await writeFile(join(skillDir, "scripts", "run.sh"), "echo run\n");
+
+    const claude = renderSkill({
+      profile: "minimal",
+      target: "claude",
+      scope: "user",
+      skills: [skill({ id: "payload", dir: skillDir })]
+    });
+    const antigravity = renderSkill({
+      profile: "minimal",
+      target: "antigravity",
+      scope: "user",
+      skills: [skill({ id: "payload", dir: skillDir })]
+    });
+
+    expect(claude.files.map((file) => file.relPath)).toEqual([
+      "claude/skills/payload/SKILL.md",
+      "claude/skills/payload/assets/nested/template.txt",
+      "claude/skills/payload/scripts/run.sh"
+    ]);
+    expect(claude.files.slice(1)).toEqual([
+      {
+        relPath: "claude/skills/payload/assets/nested/template.txt",
+        copySource: join(skillDir, "assets", "nested", "template.txt"),
+        marker: true
+      },
+      {
+        relPath: "claude/skills/payload/scripts/run.sh",
+        copySource: join(skillDir, "scripts", "run.sh"),
+        marker: true
+      }
+    ]);
+    expect(antigravity.files.map((file) => file.relPath)).toEqual([
+      "antigravity/skills/payload/SKILL.md",
+      "antigravity/skills/payload/assets/nested/template.txt",
+      "antigravity/skills/payload/scripts/run.sh"
     ]);
   });
 });

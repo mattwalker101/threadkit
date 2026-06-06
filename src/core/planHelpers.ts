@@ -135,10 +135,12 @@ export async function readCurrentManagedFileState(args: {
     };
   }
 
+  const currentSha256 = sha256(content);
+
   return {
     kind: "present",
-    marker: hasManagedMarker(content),
-    sha256: sha256(content),
+    marker: hasManagedMarker(content) || (args.fallbackMarker && currentSha256 === args.fallbackSha256),
+    sha256: currentSha256,
     content
   };
 }

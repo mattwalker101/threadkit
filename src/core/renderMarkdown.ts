@@ -1,4 +1,4 @@
-import { enabledSkills } from "./renderHelpers.js";
+import { enabledSkills, renderSkillPayloadFiles } from "./renderHelpers.js";
 import { MANAGED_MARKER_TOKEN } from "./marker.js";
 import type { RenderInput, RenderResult, Renderer } from "./renderTypes.js";
 
@@ -15,6 +15,13 @@ export function renderMarkdown(input: RenderInput): RenderResult {
 
   const content = [`# ${input.profile}`, "", marker, "", ...sections].join("\n").trimEnd() + "\n";
 
+  const payloadFiles = renderSkillPayloadFiles({
+    skills: input.skills,
+    targetKey: "markdown",
+    relPathForPayload: ({ skill, payloadDir, payloadRelPath }) =>
+      `markdown/skills/${skill.id}/${payloadDir}/${payloadRelPath}`
+  });
+
   return {
     format: "markdown",
     files: [
@@ -22,7 +29,8 @@ export function renderMarkdown(input: RenderInput): RenderResult {
         relPath: `markdown/${input.profile}.md`,
         content,
         marker: true
-      }
+      },
+      ...payloadFiles
     ],
     warnings: []
   };

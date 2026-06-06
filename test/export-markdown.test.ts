@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ async function makeTempRoot(): Promise<string> {
 
 function skill(args: {
   id: string;
+  dir?: string;
   name?: string;
   summary?: string;
   triggers?: string[];
@@ -20,7 +21,7 @@ function skill(args: {
 }): LoadedSkill {
   return {
     id: args.id,
-    dir: `/root/skills/${args.id}`,
+    dir: args.dir ?? join(process.cwd(), ".missing-test-skills", args.id),
     metadata: {
       id: args.id,
       name: args.name ?? args.id,
@@ -111,6 +112,30 @@ describe("markdown renderer", () => {
     expect(result.files[0].content).toContain("Triggers:\n- create a handoff\n- write handoff notes");
     expect(result.files[0].content).toContain("Use this skill when handing off work.");
   });
+
+  it("includes markdown payload files in skill-scoped folders next to the aggregate file", async () => {
+    const root = await makeTempRoot();
+    const skillDir = join(root, "skills", "payload");
+    await mkdir(join(skillDir, "scripts"), { recursive: true });
+    await writeFile(join(skillDir, "scripts", "run.sh"), "echo run\n");
+
+    const result = renderMarkdown({
+      profile: "minimal",
+      target: "markdown",
+      scope: "user",
+      skills: [skill({ id: "payload", dir: skillDir })]
+    });
+
+    expect(result.files.map((file) => file.relPath)).toEqual([
+      "markdown/minimal.md",
+      "markdown/skills/payload/scripts/run.sh"
+    ]);
+    expect(result.files[1]).toEqual({
+      relPath: "markdown/skills/payload/scripts/run.sh",
+      copySource: join(skillDir, "scripts", "run.sh"),
+      marker: true
+    });
+  });
 });
 
 describe("export writer", () => {
@@ -135,6 +160,36 @@ describe("export writer", () => {
         relPath: "markdown/minimal.md",
         marker: true,
         bytes: Buffer.byteLength("# minimal\n")
+      }
+    ]);
+  });
+
+  it("copies file specs from copySource", async () => {
+    const root = await makeTempRoot();
+    const sourceRoot = await makeTempRoot();
+    const sourcePath = join(sourceRoot, "template.txt");
+    await writeFile(sourcePath, "asset\n");
+
+    const files = await writeExportFiles({
+      outDir: root,
+      files: [
+        {
+          relPath: "markdown/skills/payload/assets/template.txt",
+          copySource: sourcePath,
+          marker: true
+        }
+      ]
+    });
+
+    expect(await readFile(join(root, "markdown", "skills", "payload", "assets", "template.txt"), "utf8")).toBe(
+      "asset\n"
+    );
+    expect(files).toEqual([
+      {
+        path: join(root, "markdown", "skills", "payload", "assets", "template.txt"),
+        relPath: "markdown/skills/payload/assets/template.txt",
+        marker: true,
+        bytes: Buffer.byteLength("asset\n")
       }
     ]);
   });
