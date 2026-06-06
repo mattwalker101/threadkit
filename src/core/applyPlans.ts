@@ -8,8 +8,7 @@ import {
   manifestPathForBaseDir,
   readCurrentManagedFileState,
   resolveBackupPath,
-  sha256,
-  stripTargetPrefix
+  sha256
 } from "./planHelpers.js";
 import { loadBackupIndex, writeBackupIndex } from "./manifestIO.js";
 import {
@@ -46,19 +45,42 @@ function timestampForPath(timestamp: string | Date | undefined): string {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
-function contentByRelPath(target: string, render: RenderResult): Map<string, FileSpec> {
+function stripInstallPrefix(relPath: string, prefix?: string): string {
+  if (!prefix) {
+    return relPath;
+  }
+
+  const normalized = prefix.endsWith("/") ? prefix : `${prefix}/`;
+  return relPath.startsWith(normalized) ? relPath.slice(normalized.length) : relPath;
+}
+
+function contentByRelPath(target: string, render: RenderResult, stripRelPathPrefix?: string): Map<string, FileSpec> {
   const files = new Map<string, FileSpec>();
 
   for (const file of render.files) {
-    files.set(stripTargetPrefix(target, file.relPath), file);
+    files.set(stripInstallPrefix(file.relPath, stripRelPathPrefix ?? target), file);
   }
 
   return files;
 }
 
-export async function applyUninstallPlan(args: { plan: UninstallPlan }): Promise<ApplyUninstallPlanResult> {
+type UninstallPlanWithOptionalManifest = Omit<UninstallPlan, "manifest"> & {
+  manifest?: UninstallPlan["manifest"];
+};
+
+export async function applyUninstallPlan(args: {
+  plan: UninstallPlan | UninstallPlanWithOptionalManifest;
+}): Promise<ApplyUninstallPlanResult> {
   const files: AppliedUninstallFile[] = [];
   const directories: AppliedUninstallDirectory[] = [];
+  const plannedManifest = args.plan.manifest ?? {
+    path: args.plan.manifestPath,
+    action: "keep" as const
+  };
+  const manifest = {
+    ...plannedManifest,
+    deleted: false
+  };
 
   for (const planned of args.plan.files) {
     const outputPath = resolveSafePathInside(args.plan.baseDir, planned.relPath);
@@ -93,6 +115,18 @@ export async function applyUninstallPlan(args: { plan: UninstallPlan }): Promise
     files.push(applied);
   }
 
+  if (plannedManifest.action === "delete") {
+    try {
+      await unlink(plannedManifest.path);
+      manifest.deleted = true;
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+      if (code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
   for (const planned of args.plan.directories) {
     const directoryPath = resolveSafePathInside(args.plan.baseDir, planned.relPath);
     const applied: AppliedUninstallDirectory = { ...planned, path: directoryPath, pruned: false };
@@ -116,6 +150,7 @@ export async function applyUninstallPlan(args: { plan: UninstallPlan }): Promise
 
   return {
     manifestPath: args.plan.manifestPath,
+    manifest,
     files,
     directories
   };
@@ -266,7 +301,7 @@ export async function applyInstallPlan(args: {
     collisionSuffix += 1;
     generationId = `${timestamp}-${collisionSuffix}`;
   }
-  const renderFiles = contentByRelPath(args.plan.target, args.render);
+  const renderFiles = contentByRelPath(args.plan.target, args.render, args.plan.stripRelPathPrefix);
   const appliedFiles: AppliedInstallFile[] = [];
 
   for (const planned of args.plan.files) {

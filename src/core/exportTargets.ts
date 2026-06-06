@@ -6,6 +6,10 @@ export interface ExportTarget {
     user?: string;
     project?: string;
   };
+  install?: {
+    stripRelPathPrefix?: string;
+    kind?: "directory" | "file";
+  };
 }
 
 export const exportTargets = {
@@ -21,6 +25,9 @@ export const exportTargets = {
     paths: {
       user: "~/.claude/skills",
       project: "./.claude/skills"
+    },
+    install: {
+      stripRelPathPrefix: "claude/skills"
     }
   },
   antigravity: {
@@ -30,6 +37,9 @@ export const exportTargets = {
     paths: {
       user: "~/.gemini/skills",
       project: "./.agents/skills"
+    },
+    install: {
+      stripRelPathPrefix: "antigravity/skills"
     }
   },
   codex: {
@@ -38,6 +48,10 @@ export const exportTargets = {
     distSubdir: "codex",
     paths: {
       project: "./AGENTS.md"
+    },
+    install: {
+      kind: "file",
+      stripRelPathPrefix: "codex"
     }
   },
   opencode: {
@@ -47,6 +61,9 @@ export const exportTargets = {
     paths: {
       user: "~/.config/opencode/command",
       project: "./.opencode/command"
+    },
+    install: {
+      stripRelPathPrefix: "opencode/command"
     }
   },
   gemini: {
@@ -56,6 +73,9 @@ export const exportTargets = {
     paths: {
       user: "~/.gemini/commands",
       project: "./.gemini/commands"
+    },
+    install: {
+      stripRelPathPrefix: "gemini/commands"
     }
   }
 } as const satisfies Record<string, ExportTarget>;

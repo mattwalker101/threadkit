@@ -17,6 +17,7 @@ export interface WritePlan {
   profile: string;
   scope: InstallScope;
   baseDir: string;
+  stripRelPathPrefix?: string;
   files: PlannedFile[];
   warnings: string[];
 }
@@ -93,12 +94,18 @@ export interface PlannedUninstallDirectory {
   action: UninstallDirectoryAction;
 }
 
+export interface PlannedUninstallManifest {
+  path: string;
+  action: "delete" | "keep";
+}
+
 export interface UninstallPlan {
   target: string;
   profile: string;
   scope: InstallScope;
   baseDir: string;
   manifestPath: string;
+  manifest: PlannedUninstallManifest;
   files: PlannedUninstallFile[];
   directories: PlannedUninstallDirectory[];
   warnings: string[];
@@ -139,6 +146,7 @@ export interface AppliedUninstallDirectory extends PlannedUninstallDirectory {
 
 export interface ApplyUninstallPlanResult {
   manifestPath: string;
+  manifest: PlannedUninstallManifest & { deleted: boolean };
   files: AppliedUninstallFile[];
   directories: AppliedUninstallDirectory[];
 }
@@ -213,4 +221,5 @@ export interface ResolvedInstallBaseDir {
   target: string;
   scope: InstallScope;
   baseDir: string;
+  installKind: "directory" | "file";
 }

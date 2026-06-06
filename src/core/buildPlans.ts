@@ -10,8 +10,7 @@ import {
   manifestPathForBaseDir,
   readCurrentManagedFileState,
   resolveBackupPath,
-  sha256,
-  stripTargetPrefix
+  sha256
 } from "./planHelpers.js";
 import {
   InstallPlanUsageError,
@@ -79,21 +78,39 @@ function ancestorRelDirs(relPath: string): string[] {
   return dirs;
 }
 
+function stripInstallPrefix(relPath: string, prefix?: string): string {
+  if (!prefix) {
+    return relPath;
+  }
+
+  const normalized = prefix.endsWith("/") ? prefix : `${prefix}/`;
+  return relPath.startsWith(normalized) ? relPath.slice(normalized.length) : relPath;
+}
+
 async function planUninstallDirectories(args: {
   baseDir: string;
   files: PlannedUninstallFile[];
   pruneEmptyDirs?: boolean;
+  removeManifest?: boolean;
 }): Promise<PlannedUninstallDirectory[]> {
   if (args.pruneEmptyDirs !== true) {
     return [];
   }
 
-  const deleteRelPaths = new Set(args.files.filter((file) => file.action === "delete").map((file) => file.relPath));
+  const removableRelPaths = new Set(
+    args.files
+      .filter((file) => file.action === "delete" || file.action === "missing")
+      .map((file) => file.relPath)
+  );
+  if (args.removeManifest === true) {
+    removableRelPaths.add(".threadkit/install-manifest.json");
+  }
+
   const candidateRelDirs: string[] = [];
   const seenRelDirs = new Set<string>();
 
   for (const file of args.files) {
-    if (file.action !== "delete") {
+    if (file.action !== "delete" && file.action !== "missing") {
       continue;
     }
 
@@ -105,6 +122,10 @@ async function planUninstallDirectories(args: {
       seenRelDirs.add(relDir);
       candidateRelDirs.push(relDir);
     }
+  }
+
+  if (args.removeManifest === true) {
+    candidateRelDirs.push(".threadkit");
   }
 
   const directories: PlannedUninstallDirectory[] = [];
@@ -127,7 +148,7 @@ async function planUninstallDirectories(args: {
 
     const emptyAfterDeletes = entries.every((entry) => {
       const entryRelPath = `${relDir}/${entry.name}`;
-      return deleteRelPaths.has(entryRelPath) || (entry.isDirectory() && pruneRelDirs.has(entryRelPath));
+      return removableRelPaths.has(entryRelPath) || (entry.isDirectory() && pruneRelDirs.has(entryRelPath));
     });
 
     if (emptyAfterDeletes) {
@@ -151,11 +172,12 @@ export async function buildPlan(args: {
   render: RenderResult;
   managedOnly: true;
   forceForeign?: boolean;
+  stripRelPathPrefix?: string;
 }): Promise<WritePlan> {
   const files: PlannedFile[] = [];
 
   for (const file of args.render.files) {
-    const relPath = stripTargetPrefix(args.target, file.relPath);
+    const relPath = stripInstallPrefix(file.relPath, args.stripRelPathPrefix ?? args.target);
     const outputPath = resolveSafePathInside(args.baseDir, relPath);
     const content = await contentForSpec(file);
     const plannedHash = sha256(content);
@@ -191,6 +213,7 @@ export async function buildPlan(args: {
     profile: args.profile,
     scope: args.scope,
     baseDir: resolve(args.baseDir),
+    ...(args.stripRelPathPrefix === undefined ? {} : { stripRelPathPrefix: args.stripRelPathPrefix }),
     files,
     warnings: args.render.warnings
   };
@@ -238,10 +261,14 @@ export async function buildUninstallPlan(args: {
     });
   }
 
+  const unsafeFileActions = files.some((file) => file.action === "skip-drifted" || file.action === "skip-foreign");
+  const manifestAction = args.pruneEmptyDirs === true && !unsafeFileActions ? "delete" : "keep";
+  const manifestPath = manifestPathForBaseDir(args.baseDir);
   const directories = await planUninstallDirectories({
     baseDir: args.baseDir,
     files,
-    pruneEmptyDirs: args.pruneEmptyDirs
+    pruneEmptyDirs: args.pruneEmptyDirs,
+    removeManifest: manifestAction === "delete"
   });
 
   return {
@@ -249,7 +276,11 @@ export async function buildUninstallPlan(args: {
     profile: args.manifest.profile,
     scope: args.manifest.scope,
     baseDir: resolve(args.baseDir),
-    manifestPath: manifestPathForBaseDir(args.baseDir),
+    manifestPath,
+    manifest: {
+      path: manifestPath,
+      action: manifestAction
+    },
     files,
     directories,
     warnings: []
