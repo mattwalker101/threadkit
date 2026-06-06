@@ -37,6 +37,12 @@ describe("skill schemas", () => {
     expect(skillSchema.parse(validSkill)).toEqual(validSkill);
   });
 
+  it("accepts the supported skill lifecycle statuses", () => {
+    for (const status of ["draft", "beta", "stable", "deprecated"]) {
+      expect(skillSchema.safeParse({ ...validSkill, status }).success).toBe(true);
+    }
+  });
+
   it("requires kebab-case skill ids", () => {
     expect(skillIdSchema.safeParse("implementation-plan").success).toBe(true);
     expect(skillIdSchema.safeParse("ImplementationPlan").success).toBe(false);

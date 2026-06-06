@@ -18,9 +18,11 @@ diagnosis before changing code.
    explain the failure.
 5. Add temporary instrumentation or targeted assertions only when they will
    distinguish between hypotheses.
-6. Implement the smallest fix that addresses the verified cause.
-7. Add or update a regression test that fails without the fix.
-8. Run the focused verification first, then broader checks appropriate to the
+6. If the user asked for diagnosis, root cause, or an investigation before a
+   fix, stop and report the verified cause before patching.
+7. Implement the smallest fix that addresses the verified cause.
+8. Add or update a regression test that fails without the fix.
+9. Run the focused verification first, then broader checks appropriate to the
    blast radius.
 
 ## Output Format

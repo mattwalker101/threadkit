@@ -86,6 +86,12 @@ Use the repository Node version before running pnpm commands. The project is
 locked to Node 24 via `.nvmrc` and `package.json#engines`; using newer Node
 versions can produce engine warnings and drift from CI.
 
+Skill promotion uses the official readiness checklist in
+[`docs/skill-readiness.md`](docs/skill-readiness.md) and the review workflow in
+[`docs/skill-review-workflow.md`](docs/skill-review-workflow.md). Do not move a
+skill out of `draft` by metadata change alone; validate, audit, render, and
+field-test it against that checklist first.
+
 ```bash
 source ~/.nvm/nvm.sh
 nvm install

@@ -38,6 +38,6 @@ flags, and verification command.
 
 - Do not capture one-off project facts as a general skill.
 - Do not use vague triggers that could activate for unrelated tasks.
-- Do not enable network, shell, file writes, scripts, or high-risk behavior
+- Do not enable external access, shell, file writes, scripts, or high-risk behavior
   unless the procedure actually needs them.
 - Do not skip schema validation after creating or changing skill files.

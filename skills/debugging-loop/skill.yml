@@ -1,7 +1,7 @@
 id: debugging-loop
 name: Debugging Loop
 version: 0.1.0
-status: draft
+status: beta
 summary: >
   Guides a disciplined reproduce, minimize, hypothesize, instrument, fix, and
   regression-test workflow for bugs and failing tests.

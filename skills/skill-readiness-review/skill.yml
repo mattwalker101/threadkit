@@ -1,0 +1,43 @@
+id: skill-readiness-review
+name: Skill Readiness Review
+version: 0.1.0
+status: draft
+summary: >
+  Runs the ThreadKit skill readiness workflow for one skill, automating
+  validation, audit, render smoke checks, project install dry-runs, review note
+  collection, and promotion evidence while pausing for human judgment.
+category: quality
+triggers:
+  - review skill readiness
+  - run skill readiness review
+  - promote this skill
+  - test this skill in a project
+  - evaluate a ThreadKit skill
+profiles:
+  - minimal
+  - coding-heavy
+targets:
+  claude:
+    enabled: true
+  antigravity:
+    enabled: true
+  codex:
+    enabled: true
+  opencode:
+    enabled: true
+  gemini:
+    enabled: false
+  markdown:
+    enabled: true
+safety:
+  allow_shell_commands: true
+  allow_network: true
+  allow_file_writes: true
+  includes_scripts: false
+tags:
+  - skills
+  - review
+  - readiness
+  - quality
+risk: medium
+owner: matthew
