@@ -29,7 +29,7 @@ const targetOverrideSchema = z
   })
   .strict();
 
-export const skillStatusSchema = z.enum(["draft", "stable", "deprecated"]);
+export const skillStatusSchema = z.enum(["draft", "beta", "stable", "deprecated"]);
 export const skillRiskSchema = z.enum(["low", "medium", "high"]);
 
 export const skillSchema = z

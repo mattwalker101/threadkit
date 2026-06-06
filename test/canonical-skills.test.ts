@@ -9,6 +9,7 @@ const expectedSkillIds = [
   "build-handoff",
   "code-review",
   "debugging-loop",
+  "skill-readiness-review",
   "skill-capture",
   "handoff"
 ];
