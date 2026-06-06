@@ -299,6 +299,42 @@ describe("install planning", () => {
       "16367aacb67a4a017c8da8ab95682ccb390863780f7114dda0a0e0c55644c7c4"
     ]);
   });
+
+  it("plans copied payload files and protects foreign payload destinations", async () => {
+    const baseDir = await makeTempRoot();
+    const sourceRoot = await makeTempRoot();
+    const sourcePath = join(sourceRoot, "template.txt");
+    const outputPath = join(baseDir, "skills", "handoff", "assets", "template.txt");
+    await writeFile(sourcePath, "asset\n");
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, "Human asset\n");
+
+    const plan = await buildPlan({
+      target: "claude",
+      profile: "minimal",
+      scope: "user",
+      baseDir,
+      render: render([
+        {
+          relPath: "claude/skills/handoff/assets/template.txt",
+          copySource: sourcePath,
+          marker: true
+        }
+      ]),
+      managedOnly: true
+    });
+
+    expect(plan.files).toMatchObject([
+      {
+        path: outputPath,
+        relPath: "skills/handoff/assets/template.txt",
+        action: "skip-foreign",
+        marker: true,
+        existingIsForeign: true,
+        sha256: sha256("asset\n")
+      }
+    ]);
+  });
 });
 
 describe("install application", () => {
@@ -339,6 +375,50 @@ describe("install application", () => {
           marker: true,
           existingIsForeign: false,
           sha256: expect.stringMatching(/^[a-f0-9]{64}$/)
+        }
+      ]
+    });
+  });
+
+  it("installs copied payload files and records them in the manifest", async () => {
+    const baseDir = await makeTempRoot();
+    const sourceRoot = await makeTempRoot();
+    const sourcePath = join(sourceRoot, "template.txt");
+    await writeFile(sourcePath, "asset\n");
+    const renderResult = render([
+      file("<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n"),
+      {
+        relPath: "claude/skills/handoff/assets/template.txt",
+        copySource: sourcePath,
+        marker: true
+      }
+    ]);
+    const plan = await buildPlan({
+      target: "claude",
+      profile: "minimal",
+      scope: "user",
+      baseDir,
+      render: renderResult,
+      managedOnly: true
+    });
+
+    const result = await applyInstallPlan({ plan, render: renderResult, timestamp: "2026-06-01T10-00-00-000Z" });
+
+    const outputPath = join(baseDir, "skills", "handoff", "assets", "template.txt");
+    expect(await readFile(outputPath, "utf8")).toBe("asset\n");
+    expect(result.files).toMatchObject([
+      { relPath: "skills/handoff/SKILL.md", action: "create" },
+      { relPath: "skills/handoff/assets/template.txt", action: "create" }
+    ]);
+    expect(JSON.parse(await readFile(result.manifestPath, "utf8"))).toMatchObject({
+      files: [
+        { relPath: "skills/handoff/SKILL.md", action: "create" },
+        {
+          relPath: "skills/handoff/assets/template.txt",
+          action: "create",
+          marker: true,
+          existingIsForeign: false,
+          sha256: sha256("asset\n")
         }
       ]
     });
@@ -1054,6 +1134,43 @@ describe("uninstall application", () => {
       { relPath: "skills/changed/SKILL.md", action: "skip-drifted", deleted: false },
       { relPath: "skills/foreign/SKILL.md", action: "skip-foreign", deleted: false },
       { relPath: "skills/missing/SKILL.md", action: "missing", deleted: false }
+    ]);
+  });
+
+  it("removes copied payload files from the install manifest", async () => {
+    const baseDir = await makeTempRoot();
+    const sourceRoot = await makeTempRoot();
+    const sourcePath = join(sourceRoot, "template.txt");
+    await writeFile(sourcePath, "asset\n");
+    const renderResult = render([
+      {
+        relPath: "claude/skills/handoff/assets/template.txt",
+        copySource: sourcePath,
+        marker: true
+      }
+    ]);
+    const installPlan = await buildPlan({
+      target: "claude",
+      profile: "minimal",
+      scope: "user",
+      baseDir,
+      render: renderResult,
+      managedOnly: true
+    });
+    await applyInstallPlan({ plan: installPlan, render: renderResult, timestamp: "2026-06-01T10-00-00-000Z" });
+    const manifest = await loadInstallManifest({ baseDir });
+
+    const uninstallPlan = await buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir });
+    const result = await applyUninstallPlan({ plan: uninstallPlan });
+
+    const outputPath = join(baseDir, "skills", "handoff", "assets", "template.txt");
+    await expect(stat(outputPath)).rejects.toThrow();
+    expect(result.files).toMatchObject([
+      {
+        relPath: "skills/handoff/assets/template.txt",
+        action: "delete",
+        deleted: true
+      }
     ]);
   });
 

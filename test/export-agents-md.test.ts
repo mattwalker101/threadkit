@@ -1,9 +1,13 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { LoadedSkill } from "../src/core/index.js";
 import { renderAgentsMd } from "../src/core/renderAgentsMd.js";
 
 function skill(args: {
   id: string;
+  dir?: string;
   name?: string;
   summary?: string;
   body?: string;
@@ -11,7 +15,7 @@ function skill(args: {
 }): LoadedSkill {
   return {
     id: args.id,
-    dir: `/root/skills/${args.id}`,
+    dir: args.dir ?? join(process.cwd(), ".missing-test-skills", args.id),
     metadata: {
       id: args.id,
       name: args.name ?? args.id,
@@ -116,5 +120,29 @@ describe("agents-md renderer", () => {
       ].join("\n")
     );
     expect(result.files[0].content).not.toContain("Triggers:");
+  });
+
+  it("includes codex payload files in skill-scoped folders next to AGENTS.md", async () => {
+    const root = await mkdtemp(join(tmpdir(), "threadkit-agents-md-"));
+    const skillDir = join(root, "skills", "payload");
+    await mkdir(join(skillDir, "assets"), { recursive: true });
+    await writeFile(join(skillDir, "assets", "template.txt"), "asset\n");
+
+    const result = renderAgentsMd({
+      profile: "minimal",
+      target: "codex",
+      scope: "user",
+      skills: [skill({ id: "payload", dir: skillDir })]
+    });
+
+    expect(result.files.map((file) => file.relPath)).toEqual([
+      "codex/AGENTS.md",
+      "codex/skills/payload/assets/template.txt"
+    ]);
+    expect(result.files[1]).toEqual({
+      relPath: "codex/skills/payload/assets/template.txt",
+      copySource: join(skillDir, "assets", "template.txt"),
+      marker: true
+    });
   });
 });

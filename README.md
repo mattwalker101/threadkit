@@ -6,6 +6,12 @@ The thread that ties your agentic skills together.
 It stores, validates, renders, and optionally installs skills. It does not execute
 skills or orchestrate agents.
 
+When a skill includes optional `assets/` or `scripts/` directories, ThreadKit
+copies regular files from those payload directories into exported target output.
+Payload files are treated as managed files during install, uninstall, rollback,
+and backup planning. Missing directories, empty directories, and symlinks are
+ignored.
+
 ## Commands
 
 All commands default to dry-run (plan-only) unless `--apply` is specified. Use
@@ -20,6 +26,10 @@ threadkit validate [--root <path>]               Validate a library
 threadkit audit [--root <path>] [--strict]       Quality warnings; --strict exits 1 on warnings
 threadkit export <target> --profile <name>       Export a profile to --out (default: dist/)
 ```
+
+Audit warnings for script and asset payloads indicate payloads that will be
+copied for enabled export targets, and script payloads should be reflected in
+`safety.includes_scripts`.
 
 ### Install lifecycle
 
