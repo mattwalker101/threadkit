@@ -1,7 +1,7 @@
 id: implementation-plan
 name: Implementation Plan
 version: 0.1.0
-status: draft
+status: beta
 summary: >
   Converts rough goals, issues, or product specs into an agent-ready
   implementation plan with scope, approach, files, tests, and assumptions.
@@ -28,7 +28,7 @@ targets:
   markdown:
     enabled: true
 safety:
-  allow_shell_commands: false
+  allow_shell_commands: true
   allow_network: false
   allow_file_writes: true
   includes_scripts: false

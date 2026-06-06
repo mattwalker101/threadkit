@@ -10,8 +10,8 @@ plan that another coding agent can execute.
 
 1. Restate the objective in concrete terms and identify the intended user-facing
    outcome.
-2. Define scope boundaries, including explicitly out-of-scope work and any
-   assumptions that need to hold for the plan to work.
+2. Define scope boundaries, including explicitly out-of-scope work, non-goals,
+   and any assumptions that need to hold for the plan to work.
 3. Inspect the relevant repository structure, existing patterns, tests, and
    nearby implementation seams before proposing changes.
 4. Break the work into ordered slices that each produce a verifiable increment.
@@ -19,7 +19,10 @@ plan that another coding agent can execute.
    coverage, and verification command.
 6. Call out risks, dependencies, migration concerns, and decisions that require
    user confirmation.
-7. If asked to persist the plan, write it as a concise markdown artifact in the
+7. If required context, files, or tools are unavailable, say what is blocked,
+   what was inspected, and what information is still needed instead of filling
+   gaps with guesses.
+8. If asked to persist the plan, write it as a concise markdown artifact in the
    location requested by the user or the repository's existing planning area.
 
 ## Output Format
@@ -28,11 +31,13 @@ Write a markdown implementation plan with these sections:
 
 - Objective
 - Scope
+- Non-goals
 - Assumptions
 - Current system notes
 - Implementation slices
 - Test plan
 - Risks and open questions
+- Blockers or incomplete information, if any
 
 ## What Not To Do
 
@@ -43,3 +48,5 @@ Write a markdown implementation plan with these sections:
   objective.
 - Do not write implementation code as part of the planning step unless the user
   explicitly asks for execution.
+- Do not present a complete plan when required repository context could not be
+  inspected; report the blocker and the partial coverage instead.
