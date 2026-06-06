@@ -16,14 +16,17 @@ or local change set before merge or further implementation.
 4. Verify claims against code, tests, types, or documentation wherever practical.
 5. Report findings first, ordered by severity, with specific file and line
    references.
-6. Include open questions or assumptions only after findings.
-7. Keep summaries secondary and concise.
+6. Report blockers, unavailable required tools, or incomplete review coverage
+   explicitly after findings.
+7. Include open questions or assumptions only after findings.
+8. Keep summaries secondary and concise.
 
 ## Output Format
 
 Write the review in this order:
 
 - Findings
+- Blockers or incomplete coverage
 - Open questions or assumptions
 - Test gaps or residual risk
 - Brief summary
@@ -38,4 +41,5 @@ and the change needed to address it.
   mode.
 - Do not rewrite the code during review unless the user explicitly asks for
   fixes.
+- Do not hide skipped files, unavailable tools, or confidence limits.
 - Do not ignore missing tests for user-facing or cross-module behavior changes.

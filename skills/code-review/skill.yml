@@ -1,7 +1,7 @@
 id: code-review
 name: Code Review
 version: 0.1.0
-status: draft
+status: beta
 summary: >
   Reviews code changes for correctness, regressions, maintainability, and
   missing tests, presenting actionable findings first.
