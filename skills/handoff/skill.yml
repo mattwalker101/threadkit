@@ -1,7 +1,7 @@
 id: handoff
 name: Handoff
 version: 0.1.0
-status: draft
+status: beta
 summary: >
   Compacts the current conversation into a handoff document that lets a fresh
   agent continue the work with minimal duplicated context.

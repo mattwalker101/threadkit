@@ -19,6 +19,7 @@ brief, or context package for another agent or a future session.
    personally identifiable information.
 6. If the user passes arguments, treat them as the intended focus for the next
    session and tailor the document accordingly.
+7. After saving the handoff, report the exact file path to the user.
 
 ## Output Format
 
@@ -39,3 +40,6 @@ Create a concise markdown handoff with these sections:
   enough.
 - Do not include secrets, credentials, or unnecessary personal data.
 - Do not invent completed work or hide unresolved blockers.
+- Do not turn a session handoff into an implementation-oriented repository
+  state handoff; use Build Handoff for branch, PR, diff, and test-state
+  continuity.
