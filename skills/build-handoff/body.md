@@ -20,7 +20,10 @@ rediscovery.
    next agent must not miss.
 6. Reference existing artifacts by path, commit, issue, or PR instead of copying
    large content into the handoff.
-7. Save the handoff only where requested or in the repository's established
+7. If branch state, PR details, issue details, or test results cannot be
+   inspected, state exactly what is unavailable and how that limits the
+   handoff.
+8. Save the handoff only where requested or in the repository's established
    handoff location.
 
 ## Output Format
@@ -29,6 +32,7 @@ Write a concise markdown handoff with these sections:
 
 - Objective
 - Repo state
+- Important references
 - Completed work
 - Pending work
 - Verification
