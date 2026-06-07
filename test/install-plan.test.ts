@@ -1104,6 +1104,40 @@ describe("uninstall planning", () => {
       }
     ]);
   });
+
+  it("plans nested directory pruning without pruning parents that still contain siblings", async () => {
+    const baseDir = await makeTempRoot();
+    const outputPath = join(baseDir, "skills", "handoff", "nested", "SKILL.md");
+    const siblingPath = join(baseDir, "skills", "shared", "notes.md");
+    const content = "<!-- threadkit:generated target=claude profile=minimal skill=handoff -->\nBody\n";
+    await mkdir(join(baseDir, "skills", "handoff", "nested"), { recursive: true });
+    await mkdir(join(baseDir, "skills", "shared"), { recursive: true });
+    await writeFile(outputPath, content);
+    await writeFile(siblingPath, "Human note\n");
+    const manifest = await loadInstallManifest({
+      baseDir: await seedInstalledManifest(baseDir, outputPath, content, "skills/handoff/nested/SKILL.md")
+    });
+
+    const plan = await buildUninstallPlan({ manifest, target: "claude", scope: "user", baseDir, pruneEmptyDirs: true });
+
+    expect(plan.directories).toEqual([
+      {
+        path: join(baseDir, "skills", "handoff", "nested"),
+        relPath: "skills/handoff/nested",
+        action: "prune"
+      },
+      {
+        path: join(baseDir, "skills", "handoff"),
+        relPath: "skills/handoff",
+        action: "prune"
+      },
+      {
+        path: join(baseDir, ".threadkit"),
+        relPath: ".threadkit",
+        action: "prune"
+      }
+    ]);
+  });
 });
 
 describe("uninstall application", () => {

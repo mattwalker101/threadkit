@@ -87,25 +87,23 @@ function stripInstallPrefix(relPath: string, prefix?: string): string {
   return relPath.startsWith(normalized) ? relPath.slice(normalized.length) : relPath;
 }
 
-async function planUninstallDirectories(args: {
-  baseDir: string;
-  files: PlannedUninstallFile[];
-  pruneEmptyDirs?: boolean;
-  removeManifest?: boolean;
-}): Promise<PlannedUninstallDirectory[]> {
-  if (args.pruneEmptyDirs !== true) {
-    return [];
-  }
+type DirectoryEntry = { name: string; isDirectory: () => boolean };
 
+function removableUninstallRelPaths(args: { files: PlannedUninstallFile[]; removeManifest?: boolean }): Set<string> {
   const removableRelPaths = new Set(
     args.files
       .filter((file) => file.action === "delete" || file.action === "missing")
       .map((file) => file.relPath)
   );
+
   if (args.removeManifest === true) {
     removableRelPaths.add(".threadkit/install-manifest.json");
   }
 
+  return removableRelPaths;
+}
+
+function candidateUninstallRelDirs(args: { files: PlannedUninstallFile[]; removeManifest?: boolean }): string[] {
   const candidateRelDirs: string[] = [];
   const seenRelDirs = new Set<string>();
 
@@ -128,30 +126,96 @@ async function planUninstallDirectories(args: {
     candidateRelDirs.push(".threadkit");
   }
 
+  return candidateRelDirs;
+}
+
+async function readDirectoryEntriesIfPresent(directoryPath: string): Promise<DirectoryEntry[] | undefined> {
+  try {
+    return await readdir(directoryPath, { withFileTypes: true });
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+    if (code !== "ENOENT") {
+      throw error;
+    }
+
+    return undefined;
+  }
+}
+
+function emptyAfterUninstallDeletes(args: {
+  relDir: string;
+  entries: DirectoryEntry[];
+  removableRelPaths: Set<string>;
+  pruneRelDirs: Set<string>;
+}): boolean {
+  return args.entries.every((entry) => {
+    const entryRelPath = `${args.relDir}/${entry.name}`;
+    return args.removableRelPaths.has(entryRelPath) || (entry.isDirectory() && args.pruneRelDirs.has(entryRelPath));
+  });
+}
+
+async function planInstallFile(args: {
+  baseDir: string;
+  target: string;
+  managedOnly: true;
+  forceForeign?: boolean;
+  stripRelPathPrefix?: string;
+  file: RenderResult["files"][number];
+}): Promise<PlannedFile> {
+  const relPath = stripInstallPrefix(args.file.relPath, args.stripRelPathPrefix ?? args.target);
+  const outputPath = resolveSafePathInside(args.baseDir, relPath);
+  const content = await contentForSpec(args.file);
+  const plannedHash = sha256(content);
+
+  let action: InstallAction = "create";
+  let existingIsForeign = false;
+
+  const current = await readCurrentManagedFileState({
+    path: outputPath,
+    fallbackMarker: args.file.marker,
+    fallbackSha256: plannedHash
+  });
+
+  if (current.kind === "present" && args.managedOnly && !current.marker) {
+    action = args.forceForeign === true ? "overwrite-foreign" : "skip-foreign";
+    existingIsForeign = true;
+  } else if (current.kind === "present") {
+    action = current.sha256 === plannedHash ? "unchanged" : "overwrite";
+  }
+
+  return {
+    path: outputPath,
+    relPath,
+    action,
+    marker: args.file.marker,
+    existingIsForeign,
+    sha256: plannedHash
+  };
+}
+
+async function planUninstallDirectories(args: {
+  baseDir: string;
+  files: PlannedUninstallFile[];
+  pruneEmptyDirs?: boolean;
+  removeManifest?: boolean;
+}): Promise<PlannedUninstallDirectory[]> {
+  if (args.pruneEmptyDirs !== true) {
+    return [];
+  }
+
+  const removableRelPaths = removableUninstallRelPaths(args);
+  const candidateRelDirs = candidateUninstallRelDirs(args);
   const directories: PlannedUninstallDirectory[] = [];
   const pruneRelDirs = new Set<string>();
 
   for (const relDir of candidateRelDirs) {
     const directoryPath = resolveSafePathInside(args.baseDir, relDir);
-    let entries: Array<{ name: string; isDirectory: () => boolean }>;
-
-    try {
-      entries = await readdir(directoryPath, { withFileTypes: true });
-    } catch (error) {
-      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
-      if (code !== "ENOENT") {
-        throw error;
-      }
-
+    const entries = await readDirectoryEntriesIfPresent(directoryPath);
+    if (entries === undefined) {
       continue;
     }
 
-    const emptyAfterDeletes = entries.every((entry) => {
-      const entryRelPath = `${relDir}/${entry.name}`;
-      return removableRelPaths.has(entryRelPath) || (entry.isDirectory() && pruneRelDirs.has(entryRelPath));
-    });
-
-    if (emptyAfterDeletes) {
+    if (emptyAfterUninstallDeletes({ relDir, entries, removableRelPaths, pruneRelDirs })) {
       pruneRelDirs.add(relDir);
       directories.push({
         path: directoryPath,
@@ -177,35 +241,16 @@ export async function buildPlan(args: {
   const files: PlannedFile[] = [];
 
   for (const file of args.render.files) {
-    const relPath = stripInstallPrefix(file.relPath, args.stripRelPathPrefix ?? args.target);
-    const outputPath = resolveSafePathInside(args.baseDir, relPath);
-    const content = await contentForSpec(file);
-    const plannedHash = sha256(content);
-
-    let action: InstallAction = "create";
-    let existingIsForeign = false;
-
-    const current = await readCurrentManagedFileState({
-      path: outputPath,
-      fallbackMarker: file.marker,
-      fallbackSha256: plannedHash
-    });
-
-    if (current.kind === "present" && args.managedOnly && !current.marker) {
-      action = args.forceForeign === true ? "overwrite-foreign" : "skip-foreign";
-      existingIsForeign = true;
-    } else if (current.kind === "present") {
-      action = current.sha256 === plannedHash ? "unchanged" : "overwrite";
-    }
-
-    files.push({
-      path: outputPath,
-      relPath,
-      action,
-      marker: file.marker,
-      existingIsForeign,
-      sha256: plannedHash
-    });
+    files.push(
+      await planInstallFile({
+        baseDir: args.baseDir,
+        target: args.target,
+        managedOnly: args.managedOnly,
+        forceForeign: args.forceForeign,
+        stripRelPathPrefix: args.stripRelPathPrefix,
+        file
+      })
+    );
   }
 
   return {
@@ -217,6 +262,43 @@ export async function buildPlan(args: {
     files,
     warnings: args.render.warnings
   };
+}
+
+async function planUninstallFile(args: {
+  baseDir: string;
+  file: InstalledManifestFile;
+}): Promise<PlannedUninstallFile> {
+  const outputPath = resolveSafePathInside(args.baseDir, args.file.relPath);
+  let action: UninstallAction = "delete";
+
+  const current = await readCurrentManagedFileState({
+    path: outputPath,
+    fallbackMarker: args.file.marker,
+    fallbackSha256: args.file.sha256
+  });
+  const marker = current.marker;
+  const currentHash = current.sha256;
+
+  if (current.kind === "missing") {
+    action = "missing";
+  } else if (!marker) {
+    action = "skip-foreign";
+  } else if (currentHash !== args.file.sha256) {
+    action = "skip-drifted";
+  }
+
+  return {
+    path: outputPath,
+    relPath: args.file.relPath,
+    action,
+    marker,
+    sha256: currentHash
+  };
+}
+
+function uninstallManifestAction(args: { files: PlannedUninstallFile[]; pruneEmptyDirs?: boolean }): UninstallPlan["manifest"]["action"] {
+  const unsafeFileActions = args.files.some((file) => file.action === "skip-drifted" || file.action === "skip-foreign");
+  return args.pruneEmptyDirs === true && !unsafeFileActions ? "delete" : "keep";
 }
 
 export async function buildUninstallPlan(args: {
@@ -231,38 +313,10 @@ export async function buildUninstallPlan(args: {
   const files: PlannedUninstallFile[] = [];
 
   for (const file of args.manifest.files) {
-    const outputPath = resolveSafePathInside(args.baseDir, file.relPath);
-    let action: UninstallAction = "delete";
-    let marker = file.marker;
-    let currentHash = file.sha256;
-
-    const current = await readCurrentManagedFileState({
-      path: outputPath,
-      fallbackMarker: file.marker,
-      fallbackSha256: file.sha256
-    });
-    marker = current.marker;
-    currentHash = current.sha256;
-
-    if (current.kind === "missing") {
-      action = "missing";
-    } else if (!marker) {
-      action = "skip-foreign";
-    } else if (currentHash !== file.sha256) {
-      action = "skip-drifted";
-    }
-
-    files.push({
-      path: outputPath,
-      relPath: file.relPath,
-      action,
-      marker,
-      sha256: currentHash
-    });
+    files.push(await planUninstallFile({ baseDir: args.baseDir, file }));
   }
 
-  const unsafeFileActions = files.some((file) => file.action === "skip-drifted" || file.action === "skip-foreign");
-  const manifestAction = args.pruneEmptyDirs === true && !unsafeFileActions ? "delete" : "keep";
+  const manifestAction = uninstallManifestAction({ files, pruneEmptyDirs: args.pruneEmptyDirs });
   const manifestPath = manifestPathForBaseDir(args.baseDir);
   const directories = await planUninstallDirectories({
     baseDir: args.baseDir,
@@ -287,6 +341,92 @@ export async function buildUninstallPlan(args: {
   };
 }
 
+type InstalledManifestFile = InstallManifest["files"][number];
+
+async function rollbackBackupStatus(args: {
+  baseDir: string;
+  file: InstalledManifestFile;
+}): Promise<{ action: RollbackAction; backupPath?: string }> {
+  if (args.file.backupPath === undefined) {
+    return { action: "no-backup" };
+  }
+
+  const backupPath = resolveBackupPath(args.baseDir, args.file.backupPath);
+
+  if (backupPath === undefined) {
+    return { action: "unsafe-backup-path" };
+  }
+
+  try {
+    await readFile(backupPath);
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+    if (code !== "ENOENT") {
+      throw error;
+    }
+
+    return { action: "missing-backup", backupPath };
+  }
+
+  return { action: "restore", backupPath };
+}
+
+async function rollbackFileState(args: {
+  outputPath: string;
+  file: InstalledManifestFile;
+  force?: boolean;
+}): Promise<{
+  action: RollbackAction;
+  marker: boolean;
+  sha256: string;
+}> {
+  const current = await currentRollbackState({
+    outputPath: args.outputPath,
+    expectedSha256: args.file.sha256,
+    fallbackMarker: args.file.marker
+  });
+  let action: RollbackAction = current.action;
+
+  if (args.force === true && action === "skip-drifted" && current.marker) {
+    action = "force-restore";
+  }
+
+  return {
+    action,
+    marker: current.marker,
+    sha256: current.sha256
+  };
+}
+
+async function planRollbackFile(args: {
+  baseDir: string;
+  file: InstalledManifestFile;
+  force?: boolean;
+}): Promise<PlannedRollbackFile> {
+  const outputPath = resolveSafePathInside(args.baseDir, args.file.relPath);
+  let marker = args.file.marker;
+  let currentHash = args.file.sha256;
+  const backup = await rollbackBackupStatus({ baseDir: args.baseDir, file: args.file });
+  let action = backup.action;
+
+  if (action === "restore") {
+    const current = await rollbackFileState({ outputPath, file: args.file, force: args.force });
+    action = current.action;
+    marker = current.marker;
+    currentHash = current.sha256;
+  }
+
+  return {
+    path: outputPath,
+    relPath: args.file.relPath,
+    action,
+    marker,
+    sha256: currentHash,
+    ...(action === "force-restore" ? { installedSha256: args.file.sha256 } : {}),
+    ...(backup.backupPath === undefined ? {} : { backupPath: backup.backupPath })
+  };
+}
+
 export async function buildRollbackPlan(args: {
   manifest: InstallManifest;
   target: string;
@@ -299,57 +439,7 @@ export async function buildRollbackPlan(args: {
   const files: PlannedRollbackFile[] = [];
 
   for (const file of args.manifest.files) {
-    const outputPath = resolveSafePathInside(args.baseDir, file.relPath);
-    let action: RollbackAction = "restore";
-    let marker = file.marker;
-    let currentHash = file.sha256;
-    let backupPath: string | undefined;
-
-    if (file.backupPath === undefined) {
-      action = "no-backup";
-    } else {
-      backupPath = resolveBackupPath(args.baseDir, file.backupPath);
-
-      if (backupPath === undefined) {
-        action = "unsafe-backup-path";
-      } else {
-        try {
-          await readFile(backupPath);
-        } catch (error) {
-          const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
-          if (code !== "ENOENT") {
-            throw error;
-          }
-
-          action = "missing-backup";
-        }
-      }
-    }
-
-    if (action === "restore") {
-      const current = await currentRollbackState({
-        outputPath,
-        expectedSha256: file.sha256,
-        fallbackMarker: file.marker
-      });
-      action = current.action;
-      marker = current.marker;
-      currentHash = current.sha256;
-
-      if (args.force === true && action === "skip-drifted" && marker) {
-        action = "force-restore";
-      }
-    }
-
-    files.push({
-      path: outputPath,
-      relPath: file.relPath,
-      action,
-      marker,
-      sha256: currentHash,
-      ...(action === "force-restore" ? { installedSha256: file.sha256 } : {}),
-      ...(backupPath === undefined ? {} : { backupPath })
-    });
+    files.push(await planRollbackFile({ baseDir: args.baseDir, file, force: args.force }));
   }
 
   return {
